@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro"
+       name="orion">
+
+    <!-- ========================================================= -->
+    <!--                 ORION Robot Assembly                      -->
+    <!-- ========================================================= -->
+
+    <!-- Common Definitions -->
+    <xacro:include filename="../common/constants.xacro"/>
+
+    <!-- Material Library -->
+    <xacro:include filename="../materials/materials.xacro"/>
+
+    <!-- Robot Components -->
+    <xacro:include filename="../links/chassis.xacro"/>
+    <xacro:include filename="../links/mast.xacro"/>
+
+    <!-- Assemble ORION -->
+    <xacro:orion_chassis/>
+    <xacro:orion_mast/>
+
+</robot>

@@ -1,0 +1,110 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- ========================================================= -->
+    <!--                  Import Robot Constants                   -->
+    <!-- ========================================================= -->
+
+    <xacro:include filename="../common/constants.xacro"/>
+
+    <!-- ========================================================= -->
+    <!--                    ORION Mast Macro                       -->
+    <!-- ========================================================= -->
+
+    <xacro:macro name="orion_mast">
+
+        <!-- ===================================================== -->
+        <!--                  Sensor Mast Link                     -->
+        <!-- ===================================================== -->
+
+        <link name="sensor_mast_link">
+
+            <!-- Visual Representation -->
+
+            <visual>
+
+                <origin
+                    xyz="0 0 0"
+                    rpy="0 0 0"/>
+
+                <geometry>
+
+                    <cylinder
+                        radius="${mast_radius}"
+                        length="${mast_height}"/>
+
+                </geometry>
+
+                <material name="orion_silver"/>
+
+            </visual>
+
+            <!-- Collision Representation -->
+
+            <collision>
+
+                <origin
+                    xyz="0 0 0"
+                    rpy="0 0 0"/>
+
+                <geometry>
+
+                    <cylinder
+                        radius="${mast_radius}"
+                        length="${mast_height}"/>
+
+                </geometry>
+
+            </collision>
+
+            <!-- Physical Properties -->
+
+            <inertial>
+
+                <origin
+                    xyz="0 0 0"
+                    rpy="0 0 0"/>
+
+                <mass value="0.6"/>
+
+                <inertia
+                    ixx="0.002"
+                    ixy="0.0"
+                    ixz="0.0"
+                    iyy="0.002"
+                    iyz="0.0"
+                    izz="0.0003"/>
+
+            </inertial>
+
+        </link>
+
+        <!-- ===================================================== -->
+        <!--                 Mast Fixed Joint                      -->
+        <!-- ===================================================== -->
+
+        <joint
+            name="sensor_mast_joint"
+            type="fixed">
+
+            <parent link="base_link"/>
+
+            <child link="sensor_mast_link"/>
+
+            <!--
+                Place the center of the mast at:
+                Top of chassis + Half mast height
+
+                Top of chassis = base_height + chassis_height/2
+            -->
+
+            <origin
+                xyz="0 0 ${base_height + chassis_height/2 + mast_height/2}"
+                rpy="0 0 0"/>
+
+        </joint>
+
+    </xacro:macro>
+
+</robot>

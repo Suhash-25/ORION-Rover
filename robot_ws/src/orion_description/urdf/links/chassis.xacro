@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- ========================================================= -->
+    <!--                  Import Robot Constants                   -->
+    <!-- ========================================================= -->
+
+    <xacro:include filename="../common/constants.xacro"/>
+
+    <!-- ========================================================= -->
+    <!--                  ORION Chassis Macro                      -->
+    <!-- ========================================================= -->
+
+    <xacro:macro name="orion_chassis">
+
+        <!-- ===================================================== -->
+        <!--                     Base Link                         -->
+        <!-- ===================================================== -->
+
+        <link name="base_link">
+
+            <!-- ================= Visual Geometry ================ -->
+
+            <visual>
+
+                <origin
+                    xyz="0 0 ${base_height}"
+                    rpy="0 0 0"/>
+
+                <geometry>
+
+                    <box
+                        size="${chassis_length}
+                              ${chassis_width}
+                              ${chassis_height}"/>
+
+                </geometry>
+
+                <material name="orion_silver"/>
+
+            </visual>
+
+            <!-- =============== Collision Geometry =============== -->
+
+            <collision>
+
+                <origin
+                    xyz="0 0 ${base_height}"
+                    rpy="0 0 0"/>
+
+                <geometry>
+
+                    <box
+                        size="${chassis_length}
+                              ${chassis_width}
+                              ${chassis_height}"/>
+
+                </geometry>
+
+            </collision>
+
+            <!-- =============== Inertial Properties ============== -->
+
+            <inertial>
+
+                <origin
+                    xyz="0 0 ${base_height}"
+                    rpy="0 0 0"/>
+
+                <mass value="${chassis_mass}"/>
+
+                <inertia
+                    ixx="0.30"
+                    ixy="0.0"
+                    ixz="0.0"
+                    iyy="0.45"
+                    iyz="0.0"
+                    izz="0.55"/>
+
+            </inertial>
+
+        </link>
+
+    </xacro:macro>
+
+</robot>
