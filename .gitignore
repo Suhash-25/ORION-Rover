@@ -1,34 +1,35 @@
-# ROS2
-robot_ws/build/
-robot_ws/install/
-robot_ws/log/
+# ===========================
+# ROS 2 Build Artifacts
+# ===========================
 
+build/
+install/
+log/
+
+# ===========================
 # Python
+# ===========================
+
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
 
-# Virtual environments
-.venv/
-venv/
+# ===========================
+# Archives
+# ===========================
 
-# IDE
+*.zip
+*.tar
+*.tar.gz
+
+# ===========================
+# VS Code
+# ===========================
+
 .vscode/
-.idea/
 
+# ===========================
 # Linux
-*~
+# ===========================
+
+*.swp
 .DS_Store
-
-# Models
-*.pt
-*.pth
-*.ckpt
-
-# Logs
-*.log
-
-# Temporary
-tmp/
-temp/
