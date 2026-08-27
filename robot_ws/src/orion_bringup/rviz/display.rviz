@@ -1,0 +1,39 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+
+Visualization Manager:
+
+  Global Options:
+    Fixed Frame: base_link
+    Background Color: 48;48;48
+
+  Displays:
+
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+
+    - Class: rviz_default_plugins/RobotModel
+      Enabled: true
+      Name: Robot
+      Description Topic:
+        Value: /robot_description
+
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 3.0
+      Pitch: 0.6
+      Yaw: 0.8
