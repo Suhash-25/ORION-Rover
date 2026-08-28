@@ -16,9 +16,37 @@
     <!-- Robot Components -->
     <xacro:include filename="../links/chassis.xacro"/>
     <xacro:include filename="../links/mast.xacro"/>
+    <xacro:include filename="../links/wheel.xacro"/>
 
     <!-- Assemble ORION -->
     <xacro:orion_chassis/>
     <xacro:orion_mast/>
+    <xacro:orion_wheel
+    wheel_name="front_left_wheel"
+    parent_link="base_link"
+    x="${wheel_x}"
+    y="${wheel_y}"
+    z="${wheel_radius}"/>
+   
+   <xacro:orion_wheel
+    wheel_name="front_right_wheel"
+    parent_link="base_link"
+    x="${wheel_x}"
+    y="${-wheel_y}"
+    z="${wheel_radius}"/>
+
+   <xacro:orion_wheel
+    wheel_name="rear_left_wheel"
+    parent_link="base_link"
+    x="${-wheel_x}"
+    y="${wheel_y}"
+    z="${wheel_radius}"/>
+
+    <xacro:orion_wheel
+    wheel_name="rear_right_wheel"
+    parent_link="base_link"
+    x="${-wheel_x}"
+    y="${-wheel_y}"
+    z="${wheel_radius}"/>
 
 </robot>

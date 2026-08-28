@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- Import Constants -->
+    <xacro:include filename="../common/constants.xacro"/>
+
+    <!-- ========================================================= -->
+    <!--                     ORION Wheel Macro                     -->
+    <!-- ========================================================= -->
+
+    <xacro:macro
+        name="orion_wheel"
+        params="wheel_name parent_link x y z">
+
+        <!-- ===================================================== -->
+        <!--                     Wheel Link                        -->
+        <!-- ===================================================== -->
+
+        <link name="${wheel_name}">
+
+            <!-- Visual -->
+
+            <visual>
+
+                <origin
+                    xyz="0 0 0"
+                    rpy="1.57079632679 0 0"/>
+
+                <geometry>
+
+                    <cylinder
+                        radius="${wheel_radius}"
+                        length="${wheel_width}"/>
+
+                </geometry>
+
+                <material name="orion_silver"/>
+
+            </visual>
+
+            <!-- Collision -->
+
+            <collision>
+
+                <origin
+                    xyz="0 0 0"
+                    rpy="1.57079632679 0 0"/>
+
+                <geometry>
+
+                    <cylinder
+                        radius="${wheel_radius}"
+                        length="${wheel_width}"/>
+
+                </geometry>
+
+            </collision>
+
+            <!-- Inertia -->
+
+            <inertial>
+
+                <origin xyz="0 0 0"/>
+
+                <mass value="${wheel_mass}"/>
+
+                <inertia
+                    ixx="0.01"
+                    ixy="0"
+                    ixz="0"
+                    iyy="0.01"
+                    iyz="0"
+                    izz="0.01"/>
+
+            </inertial>
+
+        </link>
+
+        <!-- ===================================================== -->
+        <!--                    Wheel Joint                        -->
+        <!-- ===================================================== -->
+
+        <joint
+            name="${wheel_name}_joint"
+            type="fixed">
+
+            <parent link="${parent_link}"/>
+
+            <child link="${wheel_name}"/>
+
+            <origin
+                xyz="${x} ${y} ${z}"
+                rpy="0 0 0"/>
+
+        </joint>
+
+    </xacro:macro>
+
+</robot>

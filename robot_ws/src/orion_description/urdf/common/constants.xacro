@@ -2,89 +2,92 @@
 
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-<!-- ========================================================= -->
-<!--                  Project Information                      -->
-<!-- ========================================================= -->
-
-<xacro:property name="robot_name" value="ORION"/>
-
-<xacro:property name="robot_version" value="1.0"/>
-
-<xacro:property name="mission_name" value="ARES"/>
-
     <!-- ========================================================= -->
-    <!--                 ORION Physical Dimensions                  -->
+    <!--                  Project Information                      -->
     <!-- ========================================================= -->
 
+    <xacro:property name="robot_name" value="ORION"/>
+    <xacro:property name="robot_version" value="1.0"/>
+    <xacro:property name="mission_name" value="ARES"/>
+
+
+    <!-- ========================================================= -->
+    <!--                 ORION Physical Dimensions                 -->
+    <!-- ========================================================= -->
+
+    <!-- Chassis -->
     <xacro:property name="chassis_length" value="0.60"/>
-
-    <xacro:property name="chassis_width" value="0.45"/>
-
+    <xacro:property name="chassis_width"  value="0.45"/>
     <xacro:property name="chassis_height" value="0.20"/>
 
+    <!-- Ground Clearance -->
     <xacro:property name="ground_clearance" value="0.08"/>
 
-    <xacro:property name="wheel_radius" value="0.08"/>
-
-    <xacro:property name="wheel_width" value="0.04"/>
-
-    <xacro:property name="wheelbase" value="0.40"/>
-
-    <xacro:property name="track_width" value="0.36"/>
-
-    <!-- Wheel Geometry -->
-    <xacro:property name="wheel_diameter" value="${2 * wheel_radius}"/>
-
-    <xacro:property name="wheel_offset" value="${wheel_width/2}"/>
-
-    <!-- Chassis Center -->
-    <xacro:property name="half_length" value="${chassis_length/2}"/>
-  
-    <xacro:property name="half_width" value="${chassis_width/2}"/>
-
+    <!-- Chassis Center Height -->
     <xacro:property name="base_height"
-                value="${ground_clearance + chassis_height/2}"/>
+                    value="${ground_clearance + chassis_height/2}"/>
 
-    <xacro:property name="front_left"
-                value="front_left_wheel"/>
+    <!-- Half Dimensions -->
+    <xacro:property name="half_length"
+                    value="${chassis_length/2}"/>
 
-    <xacro:property name="front_right"
-                value="front_right_wheel"/>
+    <xacro:property name="half_width"
+                    value="${chassis_width/2}"/>
 
-    <xacro:property name="rear_left"
-                value="rear_left_wheel"/>
-
-    <xacro:property name="rear_right"
-                value="rear_right_wheel"/>
 
     <!-- ========================================================= -->
-    <!--                       Robot Mass                          -->
+    <!--                    Wheel Parameters                       -->
+    <!-- ========================================================= -->
+
+    <!-- Large Off-road Wheels -->
+    <xacro:property name="wheel_radius" value="0.12"/>
+    <xacro:property name="wheel_width"  value="0.06"/>
+    <xacro:property name="wheel_mass"   value="1.5"/>
+
+    <!-- Robot Geometry -->
+    <xacro:property name="wheelbase" value="0.40"/>
+    <xacro:property name="track_width" value="0.36"/>
+
+    <!-- Derived Wheel Dimensions -->
+    <xacro:property name="wheel_diameter"
+                    value="${2 * wheel_radius}"/>
+
+    <xacro:property name="wheel_offset"
+                    value="${wheel_width/2}"/>
+
+    <!-- Wheel Positions -->
+    <xacro:property name="wheel_x" value="0.25"/>
+    <xacro:property name="wheel_y" value="0.26"/>
+
+
+    <!-- ========================================================= -->
+    <!--                     Robot Masses                          -->
     <!-- ========================================================= -->
 
     <xacro:property name="chassis_mass" value="8.0"/>
 
-    <xacro:property name="wheel_mass" value="0.5"/>
-
 
     <!-- ========================================================= -->
-    <!--                     Sensor Heights                        -->
+    <!--                   Sensor Parameters                       -->
     <!-- ========================================================= -->
 
+    <!-- Sensor Mast -->
+    <xacro:property name="mast_height" value="0.24"/>
+    <xacro:property name="mast_radius" value="0.025"/>
+
+    <!-- Sensor Heights -->
     <xacro:property name="camera_height" value="0.26"/>
-
     <xacro:property name="lidar_height" value="0.34"/>
-
     <xacro:property name="camera360_height" value="0.42"/>
 
-    <xacro:property name="mast_height" value="0.24"/>
 
-    <xacro:property name="mast_radius" value="0.025"/>
     <!-- ========================================================= -->
-    <!--                     Wheel Positions                       -->
+    <!--                    Link Name Helpers                      -->
     <!-- ========================================================= -->
 
-    <xacro:property name="wheel_x" value="0.20"/>
-
-    <xacro:property name="wheel_y" value="0.18"/>
+    <xacro:property name="front_left"  value="front_left_wheel"/>
+    <xacro:property name="front_right" value="front_right_wheel"/>
+    <xacro:property name="rear_left"   value="rear_left_wheel"/>
+    <xacro:property name="rear_right"  value="rear_right_wheel"/>
 
 </robot>
