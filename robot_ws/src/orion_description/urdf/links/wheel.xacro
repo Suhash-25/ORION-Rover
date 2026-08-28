@@ -83,7 +83,7 @@
 
         <joint
             name="${wheel_name}_joint"
-            type="fixed">
+            type="continuous">
 
             <parent link="${parent_link}"/>
 
@@ -92,6 +92,8 @@
             <origin
                 xyz="${x} ${y} ${z}"
                 rpy="0 0 0"/>
+           <axis xyz="0 1 0"/>
+	  <dynamics damping="0.2" friction="0.1"/>
 
         </joint>
 
