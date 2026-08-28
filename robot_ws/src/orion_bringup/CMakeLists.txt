@@ -34,4 +34,13 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+###########################################################
+# Install Gazebo Worlds
+###########################################################
+
+install(
+  DIRECTORY worlds
+  DESTINATION share/${PROJECT_NAME}
+)
+
 ament_package()
