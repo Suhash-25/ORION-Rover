@@ -1,0 +1,64 @@
+controller_manager:
+  ros__parameters:
+
+    update_rate: 100
+
+    ###########################################################
+    # Joint State Broadcaster
+    ###########################################################
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    ###########################################################
+    # Differential Drive Controller
+    ###########################################################
+
+    diff_drive_controller:
+      type: diff_drive_controller/DiffDriveController
+
+
+diff_drive_controller:
+  ros__parameters:
+
+    ###########################################################
+    # Left Wheels
+    ###########################################################
+
+    left_wheel_names:
+      - front_left_wheel_joint
+      - rear_left_wheel_joint
+
+    ###########################################################
+    # Right Wheels
+    ###########################################################
+
+    right_wheel_names:
+      - front_right_wheel_joint
+      - rear_right_wheel_joint
+
+    ###########################################################
+    # Robot Geometry
+    ###########################################################
+
+    wheel_separation: 0.52
+
+    wheel_radius: 0.12
+
+    ###########################################################
+    # Controller Settings
+    ###########################################################
+
+    publish_rate: 50.0
+
+    base_frame_id: base_link
+
+    odom_frame_id: odom
+
+    enable_odom_tf: true
+
+    open_loop: false
+
+    cmd_vel_timeout: 0.5
+
+    use_stamped_vel: false

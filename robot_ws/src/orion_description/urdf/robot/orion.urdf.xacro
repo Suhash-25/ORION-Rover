@@ -4,13 +4,13 @@
        name="orion">
 
     <!-- ========================================================= -->
-    <!--                 ORION Robot Assembly                      -->
+    <!--                  ORION Robot Assembly                     -->
     <!-- ========================================================= -->
 
-    <!-- Common Definitions -->
+    <!-- Common Constants -->
     <xacro:include filename="../common/constants.xacro"/>
 
-    <!-- Material Library -->
+    <!-- Materials -->
     <xacro:include filename="../materials/materials.xacro"/>
 
     <!-- Robot Components -->
@@ -18,35 +18,59 @@
     <xacro:include filename="../links/mast.xacro"/>
     <xacro:include filename="../links/wheel.xacro"/>
 
-    <!-- Assemble ORION -->
+    <!-- ROS2 Control -->
+    <xacro:include filename="../control/ros2_control.xacro"/>
+ 
+    <!-- ========================================================= -->
+    <!--                    Build the Robot                        -->
+    <!-- ========================================================= -->
+
+    <!-- Chassis -->
     <xacro:orion_chassis/>
+
+    <!-- Sensor Mast -->
     <xacro:orion_mast/>
+
+    <!-- ================= Front Left Wheel ================= -->
+
     <xacro:orion_wheel
-    wheel_name="front_left_wheel"
-    parent_link="base_link"
-    x="${wheel_x}"
-    y="${wheel_y}"
-    z="${wheel_radius}"/>
+        wheel_name="front_left_wheel"
+        parent_link="base_link"
+        x="${wheel_x}"
+        y="${wheel_y}"
+        z="${wheel_radius}"/>
+
+    <!-- ================= Front Right Wheel ================= -->
+
+    <xacro:orion_wheel
+        wheel_name="front_right_wheel"
+        parent_link="base_link"
+        x="${wheel_x}"
+        y="${-wheel_y}"
+        z="${wheel_radius}"/>
+
+    <!-- ================= Rear Left Wheel ================= -->
+
+    <xacro:orion_wheel
+        wheel_name="rear_left_wheel"
+        parent_link="base_link"
+        x="${-wheel_x}"
+        y="${wheel_y}"
+        z="${wheel_radius}"/>
+
+    <!-- ================= Rear Right Wheel ================= -->
+
+    <xacro:orion_wheel
+        wheel_name="rear_right_wheel"
+        parent_link="base_link"
+        x="${-wheel_x}"
+        y="${-wheel_y}"
+        z="${wheel_radius}"/>
+
+    <!-- ========================================================= -->
+    <!--                    ROS2 Control                           -->
+    <!-- ========================================================= -->
+
+    <xacro:orion_ros2_control/>
    
-   <xacro:orion_wheel
-    wheel_name="front_right_wheel"
-    parent_link="base_link"
-    x="${wheel_x}"
-    y="${-wheel_y}"
-    z="${wheel_radius}"/>
-
-   <xacro:orion_wheel
-    wheel_name="rear_left_wheel"
-    parent_link="base_link"
-    x="${-wheel_x}"
-    y="${wheel_y}"
-    z="${wheel_radius}"/>
-
-    <xacro:orion_wheel
-    wheel_name="rear_right_wheel"
-    parent_link="base_link"
-    x="${-wheel_x}"
-    y="${-wheel_y}"
-    z="${wheel_radius}"/>
-
 </robot>
