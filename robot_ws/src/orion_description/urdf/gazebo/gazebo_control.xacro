@@ -2,17 +2,39 @@
 
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+  <!-- ========================================================= -->
+  <!--              Gazebo ros2_control Plugin                   -->
+  <!-- ========================================================= -->
+
   <xacro:macro name="orion_gazebo_control">
 
     <gazebo>
 
       <plugin
-          filename="libgz_ros2_control-system.so"
-          name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        filename="libgz_ros2_control-system.so"
+        name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+
+        <!-- Robot Description -->
+
+        <robot_param>
+          robot_description
+        </robot_param>
+
+        <robot_param_node>
+          robot_state_publisher
+        </robot_param_node>
+
+        <!-- Controller Configuration -->
 
         <parameters>
-          $(find-pkg-share orion_control)/config/controllers.yaml
+          $(find orion_control)/config/controllers.yaml
         </parameters>
+
+        <!-- Controller Manager -->
+
+        <controller_manager_prefix_node_name>
+          controller_manager
+        </controller_manager_prefix_node_name>
 
       </plugin>
 

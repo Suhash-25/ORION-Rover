@@ -20,6 +20,7 @@
 
     <!-- ROS2 Control -->
     <xacro:include filename="../control/ros2_control.xacro"/>
+    <xacro:include filename="../gazebo/gazebo_control.xacro"/>
  
     <!-- ========================================================= -->
     <!--                    Build the Robot                        -->
@@ -72,5 +73,6 @@
     <!-- ========================================================= -->
 
     <xacro:orion_ros2_control/>
+    <xacro:orion_gazebo_control/>
    
 </robot>

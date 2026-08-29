@@ -1,6 +1,10 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import IncludeLaunchDescription, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
+from launch.launch_description_sources import (
+    AnyLaunchDescriptionSource,
+    PythonLaunchDescriptionSource,
+)
 
 from launch.substitutions import Command
 from launch_ros.parameter_descriptions import ParameterValue
@@ -17,6 +21,7 @@ def generate_launch_description():
     bringup_pkg = get_package_share_directory("orion_bringup")
     description_pkg = get_package_share_directory("orion_description")
     gazebo_pkg = get_package_share_directory("ros_gz_sim")
+    bridge_pkg = get_package_share_directory("ros_gz_bridge")
 
     world = os.path.join(
         bringup_pkg,
@@ -49,12 +54,22 @@ def generate_launch_description():
         }.items()
     )
 
+    # gz_ros2_control uses simulated time. Bridge Gazebo's /clock before the
+    # robot is spawned so controller activation receives simulation updates.
+    clock_bridge = IncludeLaunchDescription(
+        AnyLaunchDescriptionSource(
+            os.path.join(bridge_pkg, "launch", "clock_bridge.launch")
+        ),
+        launch_arguments={"bridge_name": "orion_clock_bridge"}.items(),
+    )
+
     robot_state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         parameters=[
             {
-                "robot_description": robot_description
+                "robot_description": robot_description,
+                "use_sim_time": True,
             }
         ],
         output="screen"
@@ -72,8 +87,25 @@ def generate_launch_description():
         output="screen"
     )
 
+    controllers = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory("orion_control"),
+                "launch",
+                "controllers.launch.py",
+            )
+        )
+    )
+
     return LaunchDescription([
         gazebo,
+        clock_bridge,
         robot_state_publisher,
-        spawn
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=spawn,
+                on_exit=[controllers],
+            )
+        ),
+        spawn,
     ])
