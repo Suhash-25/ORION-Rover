@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ========================================================= -->
+  <!--             Gazebo 2D LiDAR Sensor Plugin                 -->
+  <!-- ========================================================= -->
+
+  <xacro:macro name="orion_lidar_gazebo">
+
+    <gazebo reference="lidar_link">
+
+      <sensor
+          name="lidar_sensor"
+          type="gpu_lidar">
+
+        <!-- Sensor Update Rate -->
+        <update_rate>10</update_rate>
+
+        <!-- Enable Visualization in Gazebo -->
+        <visualize>true</visualize>
+
+        <!-- ROS Topic -->
+        <topic>/scan</topic>
+
+        <gz_frame_id>lidar_link</gz_frame_id>
+
+        <ray>
+
+          <!-- Horizontal Scan -->
+          <scan>
+
+            <horizontal>
+
+              <samples>720</samples>
+
+              <resolution>1</resolution>
+
+              <min_angle>-3.14159</min_angle>
+
+              <max_angle>3.14159</max_angle>
+
+            </horizontal>
+
+          </scan>
+
+          <!-- Measurement Range -->
+          <range>
+
+            <min>0.12</min>
+
+            <max>12.0</max>
+
+            <resolution>0.01</resolution>
+
+          </range>
+
+        </ray>
+
+      </sensor>
+
+    </gazebo>
+
+  </xacro:macro>
+
+</robot>

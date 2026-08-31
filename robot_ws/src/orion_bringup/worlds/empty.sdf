@@ -1,27 +1,59 @@
-<?xml version="1.0" ?>
+<?xml version="1.0"?>
+
 <sdf version="1.9">
 
   <world name="orion_world">
 
-    <!-- Sun -->
+    <!-- ===================== -->
+    <!-- Physics               -->
+    <!-- ===================== -->
+
+    <physics name="physics" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <!-- ===================== -->
+    <!-- World Plugins         -->
+    <!-- ===================== -->
+
+    <plugin
+      filename="gz-sim-physics-system"
+      name="gz::sim::systems::Physics"/>
+
+    <plugin
+      filename="gz-sim-user-commands-system"
+      name="gz::sim::systems::UserCommands"/>
+
+    <plugin
+      filename="gz-sim-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster"/>
+
+    <!-- ⭐ This is the important one ⭐ -->
+
+    <plugin
+      filename="gz-sim-sensors-system"
+      name="gz::sim::systems::Sensors">
+
+      <render_engine>ogre2</render_engine>
+
+    </plugin>
+
+    <!-- ===================== -->
+    <!-- Sun                   -->
+    <!-- ===================== -->
+
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Sun</uri>
     </include>
 
-    <!-- Ground Plane -->
+    <!-- ===================== -->
+    <!-- Ground                -->
+    <!-- ===================== -->
+
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Ground Plane</uri>
     </include>
-
-    <physics
-      name="1ms"
-      type="ignored">
-
-      <max_step_size>0.001</max_step_size>
-
-      <real_time_factor>1.0</real_time_factor>
-
-    </physics>
 
   </world>
 

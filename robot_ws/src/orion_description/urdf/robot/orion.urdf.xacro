@@ -17,10 +17,12 @@
     <xacro:include filename="../links/chassis.xacro"/>
     <xacro:include filename="../links/mast.xacro"/>
     <xacro:include filename="../links/wheel.xacro"/>
+    <xacro:include filename="../sensors/lidar.xacro"/>    
 
     <!-- ROS2 Control -->
     <xacro:include filename="../control/ros2_control.xacro"/>
     <xacro:include filename="../gazebo/gazebo_control.xacro"/>
+    <xacro:include filename="../gazebo/lidar_gazebo.xacro"/>
  
     <!-- ========================================================= -->
     <!--                    Build the Robot                        -->
@@ -31,6 +33,9 @@
 
     <!-- Sensor Mast -->
     <xacro:orion_mast/>
+
+    <xacro:orion_lidar
+    parent_link="sensor_mast_link"/>
 
     <!-- ================= Front Left Wheel ================= -->
 
@@ -74,5 +79,6 @@
 
     <xacro:orion_ros2_control/>
     <xacro:orion_gazebo_control/>
-   
+    <xacro:orion_lidar_gazebo/>   
+
 </robot>

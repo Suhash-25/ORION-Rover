@@ -87,6 +87,15 @@ def generate_launch_description():
         output="screen"
     )
 
+    bridge = Node(
+    package="ros_gz_bridge",
+    executable="parameter_bridge",
+    arguments=[
+        "/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",
+    ],
+    output="screen",
+    )
+
     controllers = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
@@ -108,4 +117,5 @@ def generate_launch_description():
             )
         ),
         spawn,
+        bridge,
     ])
