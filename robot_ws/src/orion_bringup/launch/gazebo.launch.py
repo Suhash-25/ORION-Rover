@@ -1,15 +1,18 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, RegisterEventHandler
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    RegisterEventHandler,
+)
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import (
     AnyLaunchDescriptionSource,
     PythonLaunchDescriptionSource,
 )
-
-from launch.substitutions import Command
-from launch_ros.parameter_descriptions import ParameterValue
+from launch.substitutions import Command, LaunchConfiguration
 
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -22,23 +25,30 @@ def generate_launch_description():
     description_pkg = get_package_share_directory("orion_description")
     gazebo_pkg = get_package_share_directory("ros_gz_sim")
     bridge_pkg = get_package_share_directory("ros_gz_bridge")
+    control_pkg = get_package_share_directory("orion_control")
 
-    world = os.path.join(
-        bringup_pkg,
-        "worlds",
-        "empty.sdf"
+    declare_world = DeclareLaunchArgument(
+        "world",
+        default_value=os.path.join(
+            bringup_pkg,
+            "worlds",
+            "empty.sdf",
+        ),
+        description="Gazebo world file",
     )
+
+    world = LaunchConfiguration("world")
 
     xacro_file = os.path.join(
         description_pkg,
         "urdf",
         "robot",
-        "orion.urdf.xacro"
+        "orion.urdf.xacro",
     )
 
     robot_description = ParameterValue(
         Command(["xacro ", xacro_file]),
-        value_type=str
+        value_type=str,
     )
 
     gazebo = IncludeLaunchDescription(
@@ -46,33 +56,37 @@ def generate_launch_description():
             os.path.join(
                 gazebo_pkg,
                 "launch",
-                "gz_sim.launch.py"
+                "gz_sim.launch.py",
             )
         ),
         launch_arguments={
-            "gz_args": world
-        }.items()
+            "gz_args": world,
+        }.items(),
     )
 
-    # gz_ros2_control uses simulated time. Bridge Gazebo's /clock before the
-    # robot is spawned so controller activation receives simulation updates.
     clock_bridge = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
-            os.path.join(bridge_pkg, "launch", "clock_bridge.launch")
+            os.path.join(
+                bridge_pkg,
+                "launch",
+                "clock_bridge.launch",
+            )
         ),
-        launch_arguments={"bridge_name": "orion_clock_bridge"}.items(),
+        launch_arguments={
+            "bridge_name": "orion_clock_bridge",
+        }.items(),
     )
 
     robot_state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
+        output="screen",
         parameters=[
             {
                 "robot_description": robot_description,
                 "use_sim_time": True,
             }
         ],
-        output="screen"
     )
 
     spawn = Node(
@@ -82,40 +96,43 @@ def generate_launch_description():
             "-topic",
             "robot_description",
             "-name",
-            "orion"
+            "orion",
         ],
-        output="screen"
+        output="screen",
     )
 
     bridge = Node(
-    package="ros_gz_bridge",
-    executable="parameter_bridge",
-    arguments=[
-        "/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",
-    ],
-    output="screen",
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        arguments=[
+            "/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",
+        ],
+        output="screen",
     )
 
     controllers = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                get_package_share_directory("orion_control"),
+                control_pkg,
                 "launch",
                 "controllers.launch.py",
             )
         )
     )
 
-    return LaunchDescription([
-        gazebo,
-        clock_bridge,
-        robot_state_publisher,
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=spawn,
-                on_exit=[controllers],
-            )
-        ),
-        spawn,
-        bridge,
-    ])
+    return LaunchDescription(
+        [
+            declare_world,
+            gazebo,
+            clock_bridge,
+            robot_state_publisher,
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=spawn,
+                    on_exit=[controllers],
+                )
+            ),
+            spawn,
+            bridge,
+        ]
+    )
