@@ -43,4 +43,13 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+###########################################################
+# Install Maps
+###########################################################
+
+install(
+  DIRECTORY maps
+  DESTINATION share/${PROJECT_NAME}
+)
+
 ament_package()
