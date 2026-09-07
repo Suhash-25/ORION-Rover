@@ -1,12 +1,14 @@
 ###############################################################
-# ARES Navigation2 Parameters
+# ORION Navigation2 Parameters
+###############################################################
+
+###############################################################
+# MAP SERVER
 ###############################################################
 
 map_server:
   ros__parameters:
-
     use_sim_time: true
-
     yaml_filename: ""
 
 ###############################################################
@@ -18,11 +20,11 @@ amcl:
 
     use_sim_time: true
 
-    base_frame_id: "base_link"
-    odom_frame_id: "odom"
-    global_frame_id: "map"
+    base_frame_id: base_link
+    odom_frame_id: odom
+    global_frame_id: map
 
-    scan_topic: "/scan"
+    scan_topic: /scan
 
     tf_broadcast: true
 
@@ -38,10 +40,325 @@ amcl:
 
     resample_interval: 1
 
-    laser_model_type: "likelihood_field"
+    laser_model_type: likelihood_field
 
 ###############################################################
-# Lifecycle Manager
+# PLANNER SERVER
+###############################################################
+
+planner_server:
+  ros__parameters:
+
+    use_sim_time: true
+
+    expected_planner_frequency: 1.0
+
+    planner_plugins:
+      - GridBased
+
+    GridBased:
+      plugin: nav2_navfn_planner::NavfnPlanner
+
+      tolerance: 0.50
+
+      use_astar: false
+
+      allow_unknown: true
+
+###############################################################
+# GLOBAL COSTMAP
+###############################################################
+
+global_costmap:
+  global_costmap:
+
+    ros__parameters:
+
+      use_sim_time: true
+
+      global_frame: map
+
+      robot_base_frame: base_link
+
+      update_frequency: 1.0
+
+      publish_frequency: 1.0
+
+      resolution: 0.05
+
+      track_unknown_space: true
+
+      rolling_window: false
+
+      robot_radius: 0.30
+
+      plugins:
+        - static_layer
+        - obstacle_layer
+        - inflation_layer
+
+###############################################################
+# STATIC LAYER
+###############################################################
+
+      static_layer:
+        plugin: nav2_costmap_2d::StaticLayer
+
+        map_subscribe_transient_local: true
+
+###############################################################
+# OBSTACLE LAYER
+###############################################################
+
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+
+        observation_sources: scan
+
+        scan:
+          topic: /scan
+
+          max_obstacle_height: 2.0
+
+          clearing: true
+
+          marking: true
+
+          data_type: LaserScan
+
+###############################################################
+# INFLATION LAYER
+###############################################################
+
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+
+        inflation_radius: 0.55
+
+        cost_scaling_factor: 3.0
+
+###############################################################
+# CONTROLLER SERVER
+###############################################################
+
+controller_server:
+  ros__parameters:
+
+    use_sim_time: true
+
+    controller_frequency: 20.0
+
+    min_x_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+
+    controller_plugins:
+      - FollowPath
+
+    FollowPath:
+      plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
+
+      desired_linear_vel: 0.50
+
+      lookahead_dist: 0.60
+
+      min_lookahead_dist: 0.30
+
+      max_lookahead_dist: 1.20
+
+      lookahead_time: 1.5
+
+      rotate_to_heading_angular_vel: 1.0
+
+      use_velocity_scaled_lookahead_dist: true
+
+      transform_tolerance: 0.2
+
+###############################################################
+# LOCAL COSTMAP
+###############################################################
+
+local_costmap:
+  local_costmap:
+
+    ros__parameters:
+
+      use_sim_time: true
+
+      global_frame: odom
+
+      robot_base_frame: base_link
+
+      rolling_window: true
+
+      width: 6
+
+      height: 6
+
+      resolution: 0.05
+
+      robot_radius: 0.30
+
+      update_frequency: 5.0
+
+      publish_frequency: 2.0
+
+      plugins:
+        - obstacle_layer
+        - inflation_layer
+
+###############################################################
+# LOCAL OBSTACLE LAYER
+###############################################################
+
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+
+        observation_sources: scan
+
+        scan:
+          topic: /scan
+
+          max_obstacle_height: 2.0
+
+          clearing: true
+
+          marking: true
+
+          data_type: LaserScan
+
+###############################################################
+# LOCAL INFLATION LAYER
+###############################################################
+
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+
+        inflation_radius: 0.55
+
+        cost_scaling_factor: 3.0
+
+###############################################################
+# VELOCITY SMOOTHER
+###############################################################
+
+velocity_smoother:
+  ros__parameters:
+
+    use_sim_time: true
+
+    smoothing_frequency: 20.0
+
+    feedback: "OPEN_LOOP"
+
+    scale_velocities: false
+
+    max_velocity:
+      - 0.5
+      - 0.0
+      - 1.0
+
+    min_velocity:
+      - 0.0
+      - 0.0
+      - -1.0
+
+    max_accel:
+      - 1.0
+      - 0.0
+      - 2.0
+
+    max_decel:
+      - -1.0
+      - 0.0
+      - -2.0
+
+###############################################################
+# BT NAVIGATOR
+###############################################################
+
+bt_navigator:
+  ros__parameters:
+
+    use_sim_time: true
+
+    global_frame: map
+
+    robot_base_frame: base_link
+
+    odom_topic: /diff_drive_controller/odom
+
+    default_bt_xml_filename: ""
+
+###############################################################
+# BEHAVIOR SERVER
+###############################################################
+
+behavior_server:
+  ros__parameters:
+
+    use_sim_time: true
+
+    local_costmap_topic: local_costmap/costmap_raw
+
+    global_costmap_topic: global_costmap/costmap_raw
+
+    local_footprint_topic: local_costmap/published_footprint
+
+    global_footprint_topic: global_costmap/published_footprint
+
+    cycle_frequency: 10.0
+
+    behavior_plugins:
+      - spin
+      - backup
+      - drive_on_heading
+      - wait
+
+    spin:
+      plugin: nav2_behaviors::Spin
+
+    backup:
+      plugin: nav2_behaviors::BackUp
+
+    drive_on_heading:
+      plugin: nav2_behaviors::DriveOnHeading
+
+    wait:
+      plugin: nav2_behaviors::Wait
+
+###############################################################
+# WAYPOINT FOLLOWER
+###############################################################
+
+waypoint_follower:
+  ros__parameters:
+
+    use_sim_time: true
+
+    stop_on_failure: false
+
+    loop_rate: 20
+
+###############################################################
+# LIFECYCLE MANAGER (NAVIGATION)
+###############################################################
+
+lifecycle_manager_navigation:
+  ros__parameters:
+
+    use_sim_time: true
+
+    autostart: true
+
+    node_names:
+      - planner_server
+      - controller_server
+      - behavior_server
+      - bt_navigator
+
+
+###############################################################
+# LIFECYCLE MANAGER (LOCALIZATION)
 ###############################################################
 
 lifecycle_manager_localization:
