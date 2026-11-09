@@ -28,6 +28,7 @@ setup(
             'trial_runner = orion_experiments.trial_runner:main',
             'plan_session = orion_experiments.protocol:main',
             'analyse_trials = orion_experiments.analysis:main',
+            'phase0_power = orion_experiments.power:main',
         ],
     },
 )
