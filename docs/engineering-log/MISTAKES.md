@@ -56,3 +56,20 @@ Format: what happened → root cause → lesson → guard now in place.
 - **Lesson:** a green run with zero tests is not a pass; always read the test count.
 - **Guard:** `extras_require={'test': ['pytest']}` in every ament_python setup.py; CI prints
   `colcon test-result --verbose` with counts.
+
+## M-009 Told the user the wrong GitHub account to give access to
+- **What:** we asked the user to add "suhasintern2" as a collaborator. The account Claude
+  actually pushes with in the cloud session was aidevops-1, so the access the user granted
+  could not help.
+- **Root cause:** we used the PR-attribution login as if it were the push identity, without
+  checking.
+- **Lesson:** check the identity before asking a human to change permissions: run
+  `gh api user --jq .login`.
+- **Cost:** about 10 minutes and two extra round trips with the user.
+
+## M-010 Temporary test shortcut outlived its reason
+- **What:** test_policy remapped /cmd_vel/policy straight to the controller "until twist_mux
+  is wired". After the merge, twist_mux was in the bringup too, so two publishers fed the
+  controller. The test still passed and hid it.
+- **Lesson:** every TEMPORARY gets an entry in the integration todo with its removal
+  condition, checked at each merge.

@@ -46,3 +46,16 @@ spec had 4 × 20. Options: (a) keep 4 × 20, (b) 40 in every cell (160 runs, too
 extends C and D to 40 each and tests at α = 0.04; NO-GO only after stage 2. Paper and SPEC now
 agree. orion_experiments analysis must implement the two looks.
 Approved by the user (suhas) at 12:01: "yes do it".
+
+## D-009 Four stacked draft PRs, pushed from the user's PC (2026-11-09)
+The user asked for a PR when each section is complete. Sections:
+1. CI
+2. Make the stack build and drive, plus the Gazebo tests
+3. IMU, spec, messages, ground truth and the paper
+4. The software stack
+
+Each PR is based on the previous one, so each diff stays reviewable. The alternative, one
+48-commit PR, would be unreviewable. Section 1 is red on its own by design: it adds the gate
+before the fix. The cloud account (aidevops-1) has no access, so the push runs on the user's
+PC with their own credentials (suhasintern), with the user's approval ("remote control to vs
+code, and push from there").

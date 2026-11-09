@@ -103,3 +103,56 @@ official ROS apt servers are blocked there. CI on GitHub uses the official apt p
 ### 12:01 User approved 40 runs in cells C and D (two-stage kill test, D-008)
 - SPEC §8, RESEARCH.md and the paper already match. Remaining: the phase-0 protocol YAML and
   analysis.py in orion_experiments get the two-stage design during integration.
+
+### 12:02 Integration branch `claude/integration`: WP1, WP2, WP4, WP5 merged
+- One conflict (orion_sim_tests/CMakeLists.txt): kept both launch tests, safety on ROS domain
+  71 and policy on 75. 10 packages built; 358 non-sim tests passed, 0 failed.
+- All four Gazebo tests (drive, nav, safety, policy) passed headless on the integrated tree.
+
+### 12:05 User: "raise pr once it is done after every section is complete"
+- Plan changed from one big PR to four stacked draft PRs, one per section (D-009).
+
+### 12:06 Integration fixes
+- test_policy no longer remaps /cmd_vel/policy straight to the controller. It drives through
+  twist_mux like the real robot. Previously the policy and twist_mux both published to the
+  controller at once.
+- Two-stage kill test (D-008) implemented in orion_experiments/analysis.py:
+  - Stage 1 returns GO or CONTINUE, never NO-GO.
+  - Stage 2 is identified by `phase0b_` trial ids, pools both stages and tests light-loose only.
+  - New config/phase0b_protocol.yaml.
+  - Tests check the p-values against a hand-computed hypergeometric.
+- An existing test asserted GO for 8/20 vs 2/20 (p = 0.032). Under the pre-registered stage-1
+  α of 0.01 that is CONTINUE, so the test changed. This is exactly the false-GO risk that D-008
+  exists to remove.
+
+### 12:08 WP3 terrain estimator merged (68 tests; Gazebo launch test passes)
+- Agent findings, all sent to the council:
+  - Gazebo IMU-only speed reads 23 % low.
+  - The sim effort model cannot be fitted (R² ≤ 0.11), so it is shipped as uncalibrated.
+  - The confidence formula zeroes confidence for a stuck rover spinning its wheels, which may
+    disable the "body speed < 0.03 for 3 s" safety rule.
+- Full tree: 11 packages, 447 tests, 0 failures, 12 skipped.
+
+### 12:09 Council review started (planning model, read-only)
+- Scope: the sim premise (B0 loses only 17 % speed, 100 % success), the 68 %-impassable soil
+  prior, the dig-rate sinkage and integrator deviations, WP3's safety question, train/deploy
+  consistency, the safety chain and the statistics.
+
+### 12:10 CI completed
+- learning.yml runs `verify.sh learning`, which passed locally in 54 s with ONNX parity < 3e-7.
+- firmware.yml runs the CMake GoogleTest suite under ASan/UBSan (passes locally), PlatformIO
+  native tests, and a Teensy compile.
+- scripts/ci_pip_deps.sh adds the pip-only dependencies to the ROS jobs.
+- Not verifiable here: the container pip step and PlatformIO.
+
+### 12:12 Message fields from the integration todo
+- RoverHealth.fw_git_hash is filled from the PONG handshake.
+- PolicyStatus.critic_gating added.
+- The README teleop command now publishes stamped messages on /cmd_vel/teleop. The old command
+  sent unstamped Twist to /cmd_vel, which nothing listens to.
+
+### 12:12–12:15 Push access
+- add_repo still refused push. The connected GitHub account is aidevops-1, and the earlier
+  message to the user named the wrong account (M-009).
+- The user chose to push from their own PC (suhasintern) over Remote Control. The four
+  branches were sent to the device as a git bundle, with the PR bodies as files.
