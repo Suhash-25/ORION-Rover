@@ -43,7 +43,7 @@ def test_accepts_good_artefact_and_matches_torch(good):
     np.testing.assert_allclose(art.action(obs, latent), a.numpy()[0], atol=1e-5)
     assert art.risk(obs, latent) == pytest.approx(float(rho), abs=1e-5)
 
-    out = OnnxController(art).step(ControlInput(obs, history, (0, 0), 0.05))
+    out = OnnxController(art).step(ControlInput(obs, history, 0.05))
     v, w = obs_spec.action_to_twist(a.numpy()[0])
     assert (out.v, out.w) == pytest.approx((v, w), abs=1e-5)
 

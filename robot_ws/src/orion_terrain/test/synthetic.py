@@ -111,7 +111,8 @@ def generate(sc: Scenario):
     for t in np.arange(0.0, sc.duration_s, 1.0 / sc.odom_hz):
         k = state(t)
         v_wheel = WHEEL_RADIUS_M * float(np.mean(wheel_speeds(k)))
-        msgs.append((t, T['wheel_odom'], {'twist': {'twist': {'linear': _xyz([v_wheel, 0, 0])}}}))
+        msgs.append((t, '/diff_drive_controller/odom',      # not an estimator input any more
+                     {'twist': {'twist': {'linear': _xyz([v_wheel, 0, 0])}}}))
     for t in np.arange(0.0, sc.duration_s, 1.0 / sc.pose_hz):
         if in_dropout(t, sc.dropouts):
             continue

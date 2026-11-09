@@ -1,6 +1,8 @@
 """B0 slip governor, escape library, probe and retreat plans."""
 
 import numpy as np
+from orion_learning import escape_library
+from orion_learning import obs_spec
 from orion_policy.controllers import BaselineB0
 from orion_policy.controllers import ControlInput
 from orion_policy.sequences import EntryPath
@@ -13,9 +15,11 @@ DT = 0.05
 
 
 def run_b0(b0, slip_side, seconds):
+    obs = np.zeros(obs_spec.OBS_DIM, np.float32)
+    obs[obs_spec.field_slice('slip_side')] = slip_side
     out = None
     for _ in range(round(seconds / DT)):
-        out = b0.step(ControlInput(obs=None, history=None, slip_side=slip_side, dt=DT))
+        out = b0.step(ControlInput(obs=obs, history=None, dt=DT))
     return out
 
 
@@ -43,18 +47,30 @@ def test_b0_floor_keeps_stuck_detector_armed():
     assert out.v == pytest.approx(0.12) and out.v > 0.1
 
 
-def test_escape_plan_follows_library():
+def test_escape_library_is_the_learning_one():
+    """One E for critic labels, sim B0 and the rover (council B3)."""
+    assert ESCAPE_LIBRARY is escape_library.E
+
+
+def test_escape_plan_plays_the_manoeuvre_ticks_of_E():
+    for index in range(len(ESCAPE_LIBRARY) + 1):           # wraps around
+        plan = escape_plan(DT, index)
+        m = ESCAPE_LIBRARY[index % len(ESCAPE_LIBRARY)]
+        targets = tuple(plan.next_target() for _ in range(len(plan)))
+        assert targets == escape_library.manoeuvre_ticks(m, DT)
+        assert len(targets) == round(m.duration_s / DT) and m.name in plan.label
+        assert plan.done
+    with pytest.raises(RuntimeError):
+        plan.next_target()
+
+
+def test_first_escape_settles_reverses_wiggles_and_creeps():
     plan = escape_plan(DT)
-    total = sum(s.duration_s for s in ESCAPE_LIBRARY)
-    assert len(plan) == round(total / DT)
     targets = [plan.next_target() for _ in range(len(plan))]
-    assert plan.done
     assert targets[0] == (0.0, 0.0)                 # settle first
     assert targets[round(1.0 / DT)] == (-0.15, 0.0)  # then reverse
     assert any(w > 0 for _, w in targets) and any(w < 0 for _, w in targets)
     assert targets[-1] == (0.12, 0.0)
-    with pytest.raises(RuntimeError):
-        plan.next_target()
 
 
 def test_probe_is_0_1_mps_straight_for_1_s():

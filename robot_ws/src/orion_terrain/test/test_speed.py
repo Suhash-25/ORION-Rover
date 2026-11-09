@@ -3,10 +3,11 @@
 import math
 
 import numpy as np
+from orion_learning import estimator as shared
 from orion_terrain.estimator import TerrainEstimator
 from orion_terrain.imu import quat_from_rpy
 from orion_terrain.params import DEFAULT_JOINT_NAMES
-from orion_terrain.speed import BodySpeedKalman, confidence, PoseDifferentiator, SpeedSource
+from orion_terrain.speed import BodySpeedKalman, PoseDifferentiator, SpeedSource
 import pytest
 
 LEVEL = (0.0, 0.0, 0.0, 1.0)
@@ -106,7 +107,6 @@ class Rig:
                 self.est.on_ground_truth_pose(t, (self.v * t, 0, 0), LEVEL)
             if lidar and k % 10 == 0:
                 self.est.on_lidar_odom(t, self.v if lidar_value is None else lidar_value)
-            self.est.on_wheel_odom(t, self.v)
         return self.est.estimate(self.t)
 
 
@@ -152,8 +152,7 @@ def test_wheel_odometry_is_never_a_speed_source():
     est = TerrainEstimator()
     for k in range(1000):
         t = k * 0.01
-        est.on_imu(t, LEVEL, (0, 0, 0), (0, 0, G))
-        est.on_wheel_odom(t, 0.4)                             # wheels spinning, rover stuck
+        est.on_imu(t, LEVEL, (0, 0, 0), (0, 0, G))           # wheels spinning, rover stuck
         est.on_joint_state(t, list(DEFAULT_JOINT_NAMES), [0.4 / 0.12] * 4, [0.0] * 4)
     e = est.estimate(10.0)
     assert e.body_speed == 0.0
@@ -162,24 +161,25 @@ def test_wheel_odometry_is_never_a_speed_source():
 
 
 # --- confidence ------------------------------------------------------------------------------
-def test_confidence_formula():
-    assert confidence(0.0, 0.3, 0.3) == pytest.approx(1.0)
-    assert confidence(3.0, 0.3, 0.3) == pytest.approx(math.exp(-1))
-    assert confidence(0.0, 0.55, 0.3) == pytest.approx(0.5)
-    assert confidence(0.0, 1.0, 0.3) == 0.0
-    assert confidence(math.inf, 0.3, 0.3) == 0.0
-    assert confidence(0.0, None, 0.3) == 0.0
+def test_confidence_is_the_shared_formula_on_the_filter_state():
+    """Confidence exp(-t_since_fix / 3) clip(1 - kf_std / 0.1, 0, 1) (M7), the env's code."""
+    rig = Rig()
+    for seconds in (2.0, 0.3, 0.6):
+        e = rig.run(seconds, external=seconds == 2.0, lidar=seconds == 2.0)
+        assert e.confidence == float(shared.speed_confidence(e.time_since_fix,
+                                                             e.body_speed_std))
 
 
-def test_confidence_drops_below_0p3_within_4s_of_fix_dropout():
+def test_confidence_drops_below_0p3_within_a_second_of_fix_dropout():
     rig = Rig()
     e = rig.run(2.0)
-    assert e.confidence > 0.95
+    assert e.confidence > 0.8 and e.time_since_fix < 0.06
     history = [rig.run(0.05, external=False, lidar=False) for _ in range(80)]
     first_low = next(i for i, h in enumerate(history) if h.confidence < 0.3)
-    assert (first_low + 1) * 0.05 <= 4.0
+    assert (first_low + 1) * 0.05 <= 1.0
     assert all(h.confidence < 0.3 for h in history[first_low:])
     assert history[-1].time_since_fix == pytest.approx(4.0, abs=0.06)
+    assert history[-1].confidence == 0.0          # std > 0.1 m/s
 
 
 def test_confidence_zero_before_any_fix():
@@ -189,11 +189,25 @@ def test_confidence_zero_before_any_fix():
     assert math.isinf(e.time_since_fix)
 
 
-def test_wheel_speed_from_joints_when_wheel_odom_is_missing():
-    est = TerrainEstimator()
-    for k in range(100):
-        t = k * 0.01
-        est.on_imu(t, LEVEL, (0, 0, 0), (0, 0, G))
-        est.on_lidar_odom(t, 0.3)
-        est.on_joint_state(t, list(DEFAULT_JOINT_NAMES), [0.55 / 0.12] * 4, [0.0] * 4)
-    assert est.estimate(1.0).confidence == pytest.approx(0.5, abs=0.02)   # |0.55-0.3|/0.5
+def test_wheel_speed_does_not_lower_confidence():
+    """Under slip the wheels disagree with the body exactly when the estimate matters (M7)."""
+    out = []
+    for wheel_mps in (0.3, 0.55):
+        est = TerrainEstimator()
+        for k in range(100):
+            t = k * 0.01
+            est.on_imu(t, LEVEL, (0, 0, 0), (0, 0, G))
+            est.on_lidar_odom(t, 0.3)
+            est.on_joint_state(t, list(DEFAULT_JOINT_NAMES), [wheel_mps / 0.12] * 4, [0.0] * 4)
+        out.append(est.estimate(1.0).confidence)
+    assert out[0] == out[1] > 0.6
+
+
+def test_time_since_fix_resets_on_each_fix_and_grows_without():
+    rig = Rig()
+    e = rig.run(1.0, lidar=False)
+    assert e.time_since_fix <= 0.05 + 1e-9               # camera at 20 Hz
+    e = rig.run(0.73, external=False, lidar=False)
+    assert e.time_since_fix == pytest.approx(0.73, abs=0.011)
+    e = rig.run(0.2, external=False)                     # lidar at 10 Hz is a fix too
+    assert e.time_since_fix <= 0.1 + 1e-9

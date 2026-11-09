@@ -17,10 +17,13 @@ orion_policy:
     caution_max_speed: 0.2        # m/s cap for 0.3 <= rho < 0.5, and for retreats
     probe_cooldown_s: 5.0
     retreat_path_s: 2.0           # s of driving kept to retreat along
-    max_escape_attempts: 3
+    max_escape_attempts: 3        # = orion_learning.escape_library.MAX_ESCAPE_ATTEMPTS
+    # B0 governor; defaults = orion_learning.baselines.B0Params (the simulator's B0). Tuning
+    # them on the rover (SPEC 8: B0 tuned on light-packed) makes sim B0 differ: log it.
     b0:
       cruise_speed: 0.3           # m/s
       slip_threshold: 0.3         # slip_side above which the governor cuts speed
       cut_rate: 0.20              # fraction of cruise per s
       recover_rate: 0.05          # fraction of cruise per s
       min_fraction: 0.4           # keeps v >= 0.12 m/s, above the stuck detector's 0.1 m/s gate
+      scale_after_escape: 0.5     # governor restarts at this fraction after an escape

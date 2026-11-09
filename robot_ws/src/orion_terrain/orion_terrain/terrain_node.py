@@ -4,7 +4,8 @@ ROS 2 node: publishes orion_msgs/TerrainState on /orion/terrain_state at 20 Hz.
 Thin wrapper around orion_terrain.estimator.TerrainEstimator. Message times are header stamps
 (receipt time for unstamped messages) and the publish tick uses the node clock, so every input
 must be stamped from the same clock (use_sim_time in Gazebo; chrony between the rover and the
-overhead-camera PC on hardware).
+overhead-camera PC on hardware). A stamp more than clock_skew_max_s off its receipt time for
+clock_skew_hold_s on the external pose, IMU or joint states is warned about (throttled).
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from orion_msgs.msg import RoverHealth, TerrainState
+from orion_terrain.clock import CLOCK_CHECKED, ClockSkewMonitor
 from orion_terrain.effort_model import EffortModel
 from orion_terrain.estimator import stamp_seconds, TerrainEstimate, TerrainEstimator
 from orion_terrain.params import DEFAULT_JOINT_NAMES, DEFAULT_TOPICS, TerrainParams
@@ -28,7 +30,6 @@ from sensor_msgs.msg import Imu, JointState
 INPUT_TYPES = {
     'joint_states': JointState,
     'imu': Imu,
-    'wheel_odom': Odometry,
     'ground_truth_pose': PoseStamped,
     'lidar_odom': Odometry,
     'rover_health': RoverHealth,
@@ -76,6 +77,8 @@ class TerrainNode(Node):
 
         model = self._load_model(model_path or default_model_path(sim))
         self.est = TerrainEstimator(params, model, sim, joint_names, logger=self.get_logger())
+        self.skew = ClockSkewMonitor(params.clock_skew_max_s, params.clock_skew_hold_s,
+                                     params.clock_skew_warn_period_s)
         for role, msg_type in INPUT_TYPES.items():
             self.create_subscription(msg_type, topics[role],
                                      lambda msg, role=role: self._on_input(role, msg),
@@ -102,7 +105,13 @@ class TerrainNode(Node):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _on_input(self, role: str, msg) -> None:
-        self.est.on_message(stamp_seconds(msg, self._now()), role, msg)
+        now = self._now()
+        t = stamp_seconds(msg, now)
+        if role in CLOCK_CHECKED:
+            warning = self.skew.update(role, t, now)
+            if warning:
+                self.get_logger().warning(warning)
+        self.est.on_message(t, role, msg)
 
     def _tick(self) -> None:
         now = self.get_clock().now()

@@ -21,10 +21,10 @@ def test_thresholds_match_the_rover_safety_config():
         pytest.skip('robot_ws not checked out next to learning/')
     p = yaml.safe_load(SAFETY_YAML.read_text())['orion_safety']['ros__parameters']
     assert (p['stuck_cmd_linear'], p['stuck_body_speed'], p['stuck_min_confidence'],
-            p['stuck_slip'], p['stuck_s'], p['hard_stuck_window_s'],
+            p['stuck_fresh_fix_s'], p['stuck_slip'], p['stuck_s'], p['hard_stuck_window_s'],
             p['hard_stuck_progress_m']) == (
-        E.STUCK_CMD_LINEAR, E.STUCK_BODY_SPEED, E.STUCK_MIN_CONFIDENCE, E.STUCK_SLIP,
-        E.STUCK_S, E.HARD_STUCK_WINDOW_S, E.HARD_STUCK_PROGRESS_M)
+        E.STUCK_CMD_LINEAR, E.STUCK_BODY_SPEED, E.STUCK_MIN_CONFIDENCE, E.STUCK_FRESH_FIX_S,
+        E.STUCK_SLIP, E.STUCK_S, E.HARD_STUCK_WINDOW_S, E.HARD_STUCK_PROGRESS_M)
 
 
 def _import_monitor():
@@ -65,7 +65,8 @@ def test_env_rule_equals_orion_safety_monitor_step_by_step(stalled):
         for i in np.flatnonzero(alive):
             m = monitors[i]
             m.on_terrain(now, float(s['body_speed'][i]), float(s['confidence'][i]),
-                         tuple(float(x) for x in s['slip_side'][i]))
+                         tuple(float(x) for x in s['slip_side'][i]),
+                         float(s['time_since_fix'][i]))
             m.on_command(now, float(info['cmd_twist'][i, 0]), float(info['cmd_twist'][i, 1]))
             pose = env.state['pose'][i]
             m.on_external_pose(now, float(pose[0]), float(pose[1]), float(pose[2]))

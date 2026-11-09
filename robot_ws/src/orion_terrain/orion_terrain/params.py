@@ -3,7 +3,10 @@ Tuning parameters of the terrain estimator (docs/SPEC.md section 4).
 
 The dataclass defaults are the single source of truth; config/terrain.yaml mirrors them for
 the ROS node and a unit test keeps the two identical. Robot geometry (wheel radius, track)
-is not a parameter here: it comes from orion_learning.obs_spec.
+is not a parameter here: it comes from orion_learning.obs_spec. Nor is anything that changes
+what an observation means (Kalman noise, confidence formula, low-pass tau, effort window):
+those are orion_learning.estimator constants, hashed into OBS_SPEC_HASH, so the rover cannot
+be tuned away from what the policy was trained on.
 """
 
 from __future__ import annotations
@@ -18,10 +21,7 @@ class TerrainParams:
 
     # Output
     rate_hz: float = 20.0                     # TerrainState publish rate
-    # Body-speed Kalman filter (1-D on v_x)
-    q_accel_mps2: float = 0.1                 # process noise: Q = q^2 dt
-    r_external_mps: float = 0.02              # measurement std, overhead camera fix
-    r_lidar_mps: float = 0.05                 # measurement std, rf2o lidar odometry
+    # Body-speed Kalman filter (1-D on v_x); its noise model is orion_learning.estimator's
     initial_speed_std_mps: float = 0.1        # prior std at start-up (rover assumed at rest)
     gravity_mps2: float = 9.81                # removed from the IMU specific force
     # External pose differentiation
@@ -30,12 +30,11 @@ class TerrainParams:
     external_timeout_s: float = 0.25
     lidar_timeout_s: float = 0.5
     imu_timeout_s: float = 0.5
-    wheel_odom_timeout_s: float = 0.5
-    # Confidence c = exp(-t_since_fix / tau) * (1 - min(1, |v_wheel - v_x| / v_disagree))
-    confidence_tau_s: float = 3.0
-    confidence_disagree_mps: float = 0.5
-    # Filters
-    slip_tau_s: float = 0.25                  # low-pass on slip and effort residual
+    # Clock check: warn when a stamp and its receipt time differ by more than this for longer
+    clock_skew_max_s: float = 0.1
+    clock_skew_hold_s: float = 1.0
+    clock_skew_warn_period_s: float = 10.0    # at most one warning per input per period
+    # Filters (slip / residual low-pass: orion_learning.estimator.LOWPASS_TAU_S)
     wheel_accel_tau_s: float = 0.05           # low-pass on the finite-difference dw/dt
 
     @classmethod
@@ -53,7 +52,6 @@ class TerrainParams:
 DEFAULT_TOPICS = {
     'joint_states': '/joint_states',
     'imu': '/imu/data',
-    'wheel_odom': '/diff_drive_controller/odom',
     'ground_truth_pose': '/orion/ground_truth_pose',
     'lidar_odom': '/odom_rf2o',
     'rover_health': '/orion/rover_health',

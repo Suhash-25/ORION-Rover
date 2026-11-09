@@ -5,11 +5,9 @@ import math
 import numpy as np
 from orion_learning import obs_spec
 from orion_policy.observation import gravity_free_accel
-from orion_policy.observation import History
 from orion_policy.observation import InputNotReady
 from orion_policy.observation import ObservationBuilder
 from orion_policy.observation import quat_to_rpy
-from orion_policy.observation import twist_to_action
 import pytest
 
 JOINTS = ['front_left_wheel_joint', 'front_right_wheel_joint',
@@ -99,21 +97,3 @@ def test_joint_state_without_wheel_or_effort_is_rejected():
         builder.update_joint_state(0.0, JOINTS[:3], [0] * 3, [0] * 3)
     with pytest.raises(ValueError, match='effort'):
         builder.update_joint_state(0.0, JOINTS, [0] * 4, [])
-
-
-def test_history_is_oldest_first_and_zero_padded():
-    h = History()
-    assert h.array().shape == (obs_spec.HISTORY_LEN, 22)
-    for k in range(3):
-        h.push(np.full(obs_spec.OBS_DIM, k, np.float32), [k, -k])
-    a = h.array()
-    assert not a[:-3].any()
-    assert a[-3, 0] == 0 and a[-2, 0] == 1 and a[-1, 0] == 2 and a[-1, -1] == -2
-    for k in range(50):
-        h.push(np.full(obs_spec.OBS_DIM, k, np.float32), [0, 0])
-    assert len(h) == obs_spec.HISTORY_LEN and h.array()[0, 0] == 10 and h.array()[-1, 0] == 49
-
-
-def test_twist_to_action_is_inverse_of_obs_spec():
-    a = twist_to_action(*obs_spec.action_to_twist([0.4, -0.7]))
-    np.testing.assert_allclose(a, [0.4, -0.7], atol=1e-6)

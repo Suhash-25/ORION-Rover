@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from geometry_msgs.msg import TwistStamped
 from orion_learning import obs_spec
+from orion_learning.baselines import B0Params
+from orion_learning.escape_library import MAX_ESCAPE_ATTEMPTS
 from orion_msgs.msg import PolicyStatus
 from orion_msgs.msg import SafetyStatus
 from orion_msgs.msg import TerrainState
@@ -46,12 +48,14 @@ class PolicyNode(Node):
         gravity = p('gravity', 9.81).value
         initial_mode = p('initial_mode', 'IDLE').value
         model_dir = p('model_dir', '').value
-        b0 = BaselineB0(
-            cruise_speed=p('b0.cruise_speed', 0.3).value,
-            slip_threshold=p('b0.slip_threshold', 0.3).value,
-            cut_rate=p('b0.cut_rate', 0.20).value,
-            recover_rate=p('b0.recover_rate', 0.05).value,
-            min_fraction=p('b0.min_fraction', 0.4).value)
+        d = B0Params()      # defaults = the simulator's B0 (orion_learning.baselines)
+        b0 = BaselineB0(B0Params(
+            cruise_v=p('b0.cruise_speed', d.cruise_v).value,
+            governor_slip=p('b0.slip_threshold', d.governor_slip).value,
+            cut_per_s=p('b0.cut_rate', d.cut_per_s).value,
+            recover_per_s=p('b0.recover_rate', d.recover_per_s).value,
+            min_scale=p('b0.min_fraction', d.min_scale).value,
+            scale_after_escape=p('b0.scale_after_escape', d.scale_after_escape).value))
         cfg = CoreConfig(
             safety_timeout_s=p('safety_timeout_s', 0.5).value,
             critic_gating=p('critic_gating', True).value,
@@ -59,7 +63,7 @@ class PolicyNode(Node):
             caution_max_speed=p('caution_max_speed', 0.2).value,
             probe_cooldown_s=p('probe_cooldown_s', 5.0).value,
             retreat_path_s=p('retreat_path_s', 2.0).value,
-            max_escape_attempts=p('max_escape_attempts', 3).value)
+            max_escape_attempts=p('max_escape_attempts', MAX_ESCAPE_ATTEMPTS).value)
 
         policy = None
         if model_dir:

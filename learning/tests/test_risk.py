@@ -91,7 +91,9 @@ def test_critic_collection_runs_the_gate_with_escapes_probes_and_retreats():
     from orion_learning.risk import collect, CriticConfig
     torch.manual_seed(0)
     teacher = ActorCritic(PPOConfig(hidden=[8], encoder_hidden=[8]), use_latent=True)
-    cc = CriticConfig(num_envs=8, rollout_steps=200, sample_every=1000, gate_p_active=0.5)
+    # 20 s: E[0] (7 s) holds a rover in ESCAPE long enough that a 10 s rollout leaves the
+    # retreat band under 1 % of the steps.
+    cc = CriticConfig(num_envs=8, rollout_steps=400, sample_every=1000, gate_p_active=0.5)
     _, _, y, modes = collect(teacher, TCNAdapter(4), E.EnvConfig(), cc, seed=0)
     assert len(y) == 0                            # sample_every > rollout: no labels
     assert modes['frac_explore'] > 0.3

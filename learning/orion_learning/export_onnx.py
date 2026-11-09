@@ -124,7 +124,9 @@ def export_controller(out_dir: Path, controller: str, policy: nn.Module,
         _export(module, inputs, output, path, {**base, 'model_kind': kind})
         parity[kind] = check_parity(module, inputs, path)
         files[kind] = path.name
-    manifest = {'controller': controller, 'obs_spec_hash': S.OBS_SPEC_HASH, 'files': files,
+    # obs_semantics is provenance for humans (what the hash covers); the runtime checks the hash.
+    manifest = {'controller': controller, 'obs_spec_hash': S.OBS_SPEC_HASH,
+                'obs_semantics': S.SEMANTICS, 'files': files,
                 'sha256': {f: sha256_file(out_dir / f) for f in files.values() if f}}
     (out_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     manifest['parity_max_abs_err'] = parity

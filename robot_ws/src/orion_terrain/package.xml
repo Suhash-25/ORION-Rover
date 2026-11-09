@@ -19,13 +19,16 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
-  <!-- orion_learning (obs_spec) and rosbags are pip packages: see requirements.txt. -->
+  <!-- orion_learning (obs_spec, estimator; pip install -e learning) and rosbags are pip
+       packages: see requirements.txt. -->
 
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
   <test_depend>launch_testing</test_depend>
   <test_depend>launch_testing_ros</test_depend>
+  <!-- test_golden_replay.py runs synthetic bags through orion_policy's ObservationBuilder. -->
+  <test_depend>orion_policy</test_depend>
 
   <export>
     <build_type>ament_python</build_type>
