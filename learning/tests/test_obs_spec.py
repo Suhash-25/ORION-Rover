@@ -5,9 +5,10 @@ from orion_learning import obs_spec as S
 
 
 def _obs(**kw):
-    base = dict(prev_cmd=(0.0, 0.0), wheel_speed=(0, 0, 0, 0), wheel_effort=(0, 0, 0, 0),
-                effort_max=3.0, body_accel_xy=(0, 0), yaw_rate=0.0, roll=0.0, pitch=0.0,
-                body_speed=0.0, speed_confidence=1.0, slip_side=(0, 0), sinkage_proxy=0.0)
+    base = {'prev_cmd': (0.0, 0.0), 'wheel_speed': (0, 0, 0, 0), 'wheel_effort': (0, 0, 0, 0),
+            'effort_max': 3.0, 'body_accel_xy': (0, 0), 'yaw_rate': 0.0, 'roll': 0.0,
+            'pitch': 0.0, 'body_speed': 0.0, 'speed_confidence': 1.0, 'slip_side': (0, 0),
+            'sinkage_proxy': 0.0}
     base.update(kw)
     return S.build_observation(**base)
 

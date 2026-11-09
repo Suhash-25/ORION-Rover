@@ -1,0 +1,4 @@
+# Training outputs (checkpoints, metrics, ONNX exports) stay out of git.
+runs/
+*.egg-info/
+.pytest_cache/
