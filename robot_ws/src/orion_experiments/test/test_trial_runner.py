@@ -17,6 +17,7 @@ from orion_experiments.trial_runner import TrialRunner
 from orion_learning import obs_spec
 from orion_msgs.msg import PolicyStatus
 from orion_msgs.msg import SafetyStatus
+from orion_msgs.msg import TerrainState
 from orion_msgs.srv import SetMode
 from orion_msgs.srv import StartTrial
 from orion_msgs.srv import StopTrial
@@ -49,9 +50,11 @@ class FakeRecorder:
 
 class Rig:
 
-    def __init__(self, tmp_path, set_mode_server=True, **params):
+    def __init__(self, tmp_path, set_mode_server=True,
+                 speed_source=TerrainState.SPEED_SOURCE_EXTERNAL, **params):
         defaults = {'bag_root': str(tmp_path), 'record_warmup_s': 0.0, 'operator': 'ana',
-                    'cone_depths_mm': [11.0, 12.5, 10.0], 'set_mode_timeout_s': 1.0}
+                    'cone_depths_mm': [11.0, 12.5, 10.0], 'set_mode_timeout_s': 1.0,
+                    'external_speed_hold_s': 0.3}
         defaults.update(params)
         self.recorders = []
 
@@ -68,6 +71,10 @@ class Rig:
         self.safety = self.node.create_publisher(SafetyStatus, '/orion/safety_status', 10)
         self.pose = self.node.create_publisher(PoseStamped, '/orion/ground_truth_pose', 10)
         self.status = self.node.create_publisher(PolicyStatus, '/orion/policy_status', 10)
+        # orion_terrain at 20 Hz; speed_source None publishes nothing.
+        self.speed_source = speed_source
+        self.terrain = self.node.create_publisher(TerrainState, '/orion/terrain_state', 10)
+        self.node.create_timer(0.05, self._publish_terrain)
         self.start_cli = self.node.create_client(StartTrial, '/orion/start_trial')
         self.stop_cli = self.node.create_client(StopTrial, '/orion/stop_trial')
         self.executor = MultiThreadedExecutor(num_threads=4)
@@ -75,6 +82,19 @@ class Rig:
         self.executor.add_node(self.node)
         self.thread = threading.Thread(target=self.executor.spin, daemon=True)
         self.thread.start()
+        if speed_source == TerrainState.SPEED_SOURCE_EXTERNAL:
+            self.wait_external(self.runner.param('external_speed_hold_s') + 0.1)
+
+    def _publish_terrain(self):
+        if self.speed_source is not None:
+            self.terrain.publish(TerrainState(body_speed_source=self.speed_source))
+
+    def wait_external(self, seconds, timeout=10.0):
+        """Wait until the runner has seen EXTERNAL for `seconds` (discovery takes a while)."""
+        end = time.monotonic() + timeout
+        while self.runner.external_speed_for_s() < seconds:
+            assert time.monotonic() < end, 'runner never saw EXTERNAL TerrainState'
+            time.sleep(0.02)
 
     def _on_set_mode(self, req, res):
         self.modes.append(req.mode)
@@ -216,6 +236,56 @@ def test_start_is_validated(rig_factory, kwargs, params, problem):
     res = rig.start(**kwargs)
     assert not res.success and problem in res.message
     assert rig.recorders == []
+
+
+def test_external_speed_gate_is_on_by_default(rig_factory):
+    rig = rig_factory()
+    runner = TrialRunner(recorder_factory=FakeRecorder)    # no overrides
+    try:
+        assert runner.param('require_external_speed') is True
+        assert runner.param('external_speed_hold_s') == 2.0
+    finally:
+        runner.destroy_node()
+    assert rig.start().success
+    assert rig.meta()['require_external_speed'] and rig.meta()['external_speed_for_s'] >= 0.3
+
+
+@pytest.mark.parametrize('source,problem', [
+    (TerrainState.SPEED_SOURCE_LIDAR_ODOM, 'body_speed_source is LIDAR_ODOM'),
+    (TerrainState.SPEED_SOURCE_IMU_ONLY, 'body_speed_source is IMU_ONLY'),
+    (None, 'no /orion/terrain_state received'),
+])
+def test_start_refused_without_external_speed(rig_factory, source, problem):
+    rig = rig_factory(speed_source=source)
+    time.sleep(0.5)
+    res = rig.start()
+    assert not res.success and problem in res.message and 'EXTERNAL' in res.message
+    assert 'require_external_speed' in res.message
+    assert rig.recorders == []
+    assert not os.path.exists(os.path.join(rig.runner.param('bag_root'), 't1'))
+
+
+def test_start_needs_external_continuously_for_the_hold_time(rig_factory):
+    rig = rig_factory(speed_source=TerrainState.SPEED_SOURCE_LIDAR_ODOM,
+                      external_speed_hold_s=1.0)
+    time.sleep(0.3)
+    rig.speed_source = TerrainState.SPEED_SOURCE_EXTERNAL
+    rig.wait_external(0.1)
+    res = rig.start()
+    assert not res.success and 'EXTERNAL for only' in res.message
+    rig.wait_external(1.0)
+    assert rig.start().success
+    rig.stop(StopTrial.Request.OUTCOME_ABORT)
+    rig.speed_source = None                     # camera (or its clock) lost
+    time.sleep(0.5)
+    res = rig.start(trial_id='t2')
+    assert not res.success and 's old' in res.message
+
+
+def test_external_speed_gate_can_be_disabled(rig_factory):
+    rig = rig_factory(speed_source=None, require_external_speed=False)
+    assert rig.start().success
+    assert rig.meta()['require_external_speed'] is False
 
 
 def test_one_trial_at_a_time_and_no_overwrite(rig_factory):

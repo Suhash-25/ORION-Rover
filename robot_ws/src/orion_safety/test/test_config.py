@@ -7,7 +7,7 @@ from orion_safety.monitor import SafetyConfig
 import yaml
 
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), '..', 'config')
-NODE_ONLY = {'rate_hz', 'wheel_joints', 'geofence_frame'}
+NODE_ONLY = {'rate_hz', 'wheel_joints', 'geofence_frame', 'clock_warn_after_s'}
 FIELDS = {f.name for f in fields(SafetyConfig)}
 
 

@@ -37,7 +37,7 @@ class Rig:
         self.feed_imu = True
         self.tilt_deg = (0.0, 0.0)            # roll, pitch
         self.efforts = [0.0, 0.0, 0.0, 0.0]
-        self.terrain = None                   # (body_speed, confidence, (slip_l, slip_r))
+        self.terrain = None                   # (speed, confidence, (slip_l, slip_r)[, t_fix])
         self.pose = None                      # external (x, y, yaw)
         self.odom = None                      # odom-frame (x, y, yaw)
         self.cmd = None                       # (v, w)
@@ -382,6 +382,34 @@ def test_stuck_by_slip(slip, cmd, stuck):
     r.run(2.9)
     assert not r.d.flags & FLAG_STUCK
     assert bool(r.run(0.2).flags & FLAG_STUCK) == stuck
+
+
+def test_stuck_by_speed_with_fresh_fix_needs_no_confidence():
+    # Council M7: stuck, wheels spinning at 0.5 m/s rim speed. The wheel/body disagreement
+    # (0.5 m/s) drives the confidence to 0, but the camera fix is 0.05 s old.
+    r = stuck_rig(confidence=0.0, slip=(1.0, 1.0), cmd=(0.5, 0.0))
+    r.terrain += (0.05,)
+    elapsed = r.time_until(lambda d: 'body 0.000 m/s (fresh fix)' in d.reason, 5.0)
+    assert 3.0 - TICK <= elapsed <= 3.0 + TICK
+    assert r.d.flags & FLAG_STUCK and r.d.state == STATE_NOMINAL
+
+
+@pytest.mark.parametrize('t_fix', [2.0, math.inf, math.nan, 0.5])
+def test_stuck_by_speed_disabled_with_stale_fix_and_low_confidence(t_fix):
+    r = stuck_rig(confidence=0.0, cmd=(0.5, 0.0))      # slip 0: only the speed rule could fire
+    r.terrain += (t_fix,)
+    assert not r.run(5.0).flags & FLAG_STUCK
+    r.terrain = r.terrain[:1] + (0.9,) + r.terrain[2:]  # confidence restores the rule
+    assert r.run(3.1).flags & FLAG_STUCK
+
+
+def test_fix_age_includes_the_age_of_the_terrain_message():
+    # Fix 0.45 s old when sent; the message then stops arriving but stays valid for 0.5 s.
+    r = stuck_rig(confidence=0.0, cmd=(0.5, 0.0))
+    r.terrain += (0.45,)
+    r.run(2.8)
+    r.terrain = None
+    assert not r.run(0.4).flags & FLAG_STUCK
 
 
 def test_stuck_needs_terrain_state():

@@ -49,7 +49,7 @@ sensor with a wrong clock cannot fake freshness. All durations are "continuously
 | startup grace | a required input never received 10 s after orion_safety started | HALT, FLAG_HEARTBEAT ("since start") | when it arrives |
 | geofence LIMITED | pose predicted 1 s ahead (unicycle arc with the twist on `/diff_drive_controller/cmd_vel`) is less than the margin inside the polygon | v <= 0.2, w <= 0.5, FLAG_GEOFENCE | prediction back inside |
 | geofence HALT | pose itself less than the margin (0.15 m) inside the polygon, or outside | HALT, FLAG_GEOFENCE | back inside the margin (teleop can drive it back) |
-| stuck | abs(cmd v) > 0.1 m/s, abs(body speed) < 0.03 m/s and confidence > 0.3 for 3 s; **or** side slip > 0.8 in the driven direction for 3 s | FLAG_STUCK only; orion_policy arms ESCAPE | immediately when neither holds |
+| stuck | abs(cmd v) > 0.1 m/s and abs(body speed) < 0.03 m/s for 3 s, with the body speed trusted: a fix younger than 0.5 s (`time_since_fix` + message age) **or** confidence > 0.3; **or** side slip > 0.8 in the driven direction for 3 s | FLAG_STUCK only; orion_policy arms ESCAPE | immediately when neither holds |
 | hard-stuck | stuck, the stuck episode is >= 20 s old, and net displacement over the last 20 s < 0.1 m | HALT, FLAG_HARD_STUCK, reason "ENTRAPPED", **latched** | reset service |
 | firmware fault | RoverHealth.fw_fault_flags != 0 | FLAG_FIRMWARE_FAULT; HALT if a bit in `firmware_halt_mask` (ENCODER, UNDERVOLTAGE, ESTOP_LATCHED) | flags clear |
 | e-stop | `/orion/estop` = true | ESTOP, **latched**; twist_mux lock | `/orion/estop` = false **and** reset with `confirm: "CLEAR ESTOP"` |
@@ -59,7 +59,7 @@ sensor with a wrong clock cannot fake freshness. All durations are "continuously
 | Input | Required? | If missing |
 | --- | --- | --- |
 | `/joint_states`, `/imu/data` | required | HALT after the timeout once seen, or after the 10 s grace if never seen |
-| `/orion/terrain_state` | optional | stuck and hard-stuck rules inactive |
+| `/orion/terrain_state` | optional | stuck and hard-stuck rules inactive (uses body_speed, confidence, slip_side, time_since_fix) |
 | `/orion/ground_truth_pose` (frame `sandbox`) | optional, preferred | geofence falls back to wheel odometry; hard-stuck progress falls back to integrated terrain body speed |
 | `/diff_drive_controller/odom` | optional fallback | geofence inactive when there is no pose at all |
 | `/diff_drive_controller/cmd_vel` | optional | zero command assumed (no prediction, no stuck) |
@@ -113,6 +113,52 @@ orion_experiments must check that the topic is alive before starting a trial.
 12. **Gazebo overrides** (`safety_sim.yaml`): effort is torque in N.m in Gazebo, measured up to
     6.7 N.m in an in-place spin, so the sim uses 10 / 20 N.m instead of 6 / 12 A; the geofence is
     off because the Gazebo worlds are not the sandbox and have no ground-truth pose.
+13. **Stuck by speed trusts a fresh fix without confidence** (council M7, `stuck_fresh_fix_s`
+    0.5 s). The SPEC confidence is c = exp(-t/3)(1 - |v_wheel - v_x| / 0.5). A rover that is
+    stuck while its wheels spin at >= 0.5 m/s rim speed has |v_wheel - v_x| >= 0.5, so c = 0
+    and the speed rule went blind exactly when it mattered. A body-speed fix (overhead camera,
+    or lidar odometry: TerrainState.time_since_fix counts any non-IMU fix) younger than 0.5 s
+    measures the body directly, so the rule only needs the confidence when the fix is stale.
+    The fix age is `time_since_fix` plus the age of the TerrainState message itself, so a
+    message that stops arriving does not stay "fresh" for the 0.5 s terrain timeout. Stale fix
+    and low confidence: the rule stays disabled, as before (an IMU-only speed must not declare
+    the rover stuck). FIX-B changes the confidence formula itself (Kalman std instead of the
+    wheel disagreement); this rule does not depend on which formula is used.
+14. **`/orion/estop` false sends ESTOP_CLEAR to the firmware at once** (council m1). In
+    `orion_hardware/src/orion_system.cpp` (`on_estop`), true sends the ESTOP frame and repeats
+    it every cycle; false sends ESTOP_CLEAR immediately, before anyone calls
+    `/orion/estop_reset`. So the firmware is ready to drive again before the host-side reset.
+    It is still safe because nothing commands the wheels until the reset: orion_safety keeps
+    its ESTOP latched and publishes zero twists at priority 255 on `/cmd_vel/estop` at 50 Hz,
+    which beats every other twist_mux input, so the drive controller sends zero wheel targets.
+    The residual risk is a dead orion_safety: then releasing the e-stop topic lets the
+    highest remaining source (teleop, policy, Nav2) drive at once, without the reset. Gating
+    ESTOP_CLEAR on the reset would need a service or topic from orion_safety to
+    orion_hardware; not done, recorded here.
+15. **twist_mux e-stop lock timeout 0.0 is fail-open for a dead e-stop publisher** (council
+    m2). With timeout 0.0 the lock acts on the last `/orion/estop` value forever, so a
+    publisher that dies (or never starts) leaves every input unmasked and nothing notices.
+    twist_mux treats an expired lock as locked, so a timeout would be fail-safe, but today
+    `/orion/estop` is published once by hand; any timeout would lock the rover 0.5 s after
+    each release. When an e-stop driver republishes `/orion/estop` at >= 10 Hz, set the lock
+    timeout to 0.5 s (`orion_control/config/twist_mux.yaml` says the same).
+16. **A sim clock that never starts is reported** (council m11). With `use_sim_time` and no
+    `/clock`, the node clock reads 0, the 50 Hz ROS-time timer never fires and no
+    SafetyStatus is published (orion_policy then refuses to drive, so this fails safe but
+    silently). A steady-clock timer logs a throttled warning once the clock is still 0 after
+    `clock_warn_after_s` (5 s).
+
+## Known gaps (threat list)
+
+What the safety chain does **not** cover. Each item is deliberate or waiting for hardware.
+
+| Gap | Consequence | Mitigation now | Fix |
+| --- | --- | --- | --- |
+| Nav2 (`/cmd_vel/nav`) and teleop (`/cmd_vel/teleop`) are not gated by SafetyStatus (council m3) | they ignore LIMITED speed caps and stuck flags; only orion_policy scales its commands to `max_linear_speed` / `max_angular_speed` | HALT masks Nav2 (priority 50 < 150); teleop overrides HALT on purpose (200 > 150, see States); ESTOP masks both; the firmware current clamp and watchdog still apply | a twist filter between twist_mux and the controller that applies SafetyStatus limits to every source |
+| Dead e-stop publisher (m2) | pressing a software e-stop does nothing; the twist_mux lock stays open | physical e-stop; operator watches SafetyStatus | repeating e-stop driver, then lock timeout 0.5 s (decision 15) |
+| ESTOP_CLEAR before the reset (m1) | firmware re-enabled before the host-side reset | priority-255 zeros from orion_safety until EstopReset (decision 14) | gate ESTOP_CLEAR on the reset |
+| Optional inputs silently absent | no geofence without a pose, no stuck rule without TerrainState | orion_experiments refuses to start a trial without EXTERNAL body speed for 2 s (council M6) | - |
+| I_cont / I_peak are GUESSES | a current HALT (trial outcome SAFETY, counted as a failure in the kill test) may fire too early or too late | values in safety.yaml flagged GUESS; BRINGUP step 4 | measured motor and driver limits |
 
 ## Operating
 
@@ -129,7 +175,11 @@ ros2 topic echo /orion/safety_status --field reason
 ## Tests
 
 - `orion_safety/test/test_monitor.py`: every rule above, entry and exit, durations to one tick,
-  cool-down, latches and reset, grace period and launch order, priority of simultaneous rules.
+  cool-down, latches and reset, grace period and launch order, priority of simultaneous rules,
+  the fresh-fix stuck rule (spinning at 0.5 m/s rim speed with confidence 0 and a 0.05 s old
+  fix flags STUCK; stale fix and low confidence do not; message age counts).
+- `orion_safety/test/test_safety_node.py`: the stalled-clock warning with and without
+  `use_sim_time`.
 - `orion_sim_tests/test/test_safety.py` (headless Gazebo): policy drives through twist_mux;
   e-stop stops the wheels within 0.5 s sim while the policy keeps publishing; reset is refused
   with the wrong phrase or while the e-stop is held, then the policy drives again.
