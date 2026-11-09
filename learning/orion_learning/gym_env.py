@@ -12,7 +12,9 @@ from orion_learning.env import EnvConfig, OrionEnv
 class OrionGymEnv(gym.Env):
     """One rover, standard Gymnasium API. info['privileged'] carries the (10,) teacher input.
 
-    Episodes end with terminated (goal, belly-out, hard-stuck, fence) or truncated (60 s).
+    Episodes end with terminated (goal, belly-out, ENTRAPPED by the orion_safety rule,
+    fence) or truncated (60 s). Defaults to the training distribution (EnvConfig()); pass
+    env.spec_eval_config() for the SPEC section 6 evaluation distribution.
     """
 
     metadata = {'render_modes': []}

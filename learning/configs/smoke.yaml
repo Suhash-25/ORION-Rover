@@ -3,7 +3,14 @@
 name: smoke
 seed: 0
 torch_threads: 1
-env: {}                      # EnvConfig overrides; {} = SPEC section 6 training ranges
+env: {}                      # EnvConfig overrides; {} = training distribution (env.py, B1)
+# Training distribution (council B1): rejection threshold on peak steady DP/W annealed from
+# env.dp_threshold[0] = 0.08 to [1] = 0.0 over this fraction of each PPO stage.
+dp_curriculum_fraction: 0.3333
+# Pre-registered target: fraction of training episodes B0 completes (logged every PPO
+# iteration as b0_completable by a shadow B0 rollout; summary.json says if the mean is in).
+b0_completable_band: [0.4, 0.6]
+b0_monitor: {num_envs: 16, steps_per_iter: 200, window: 256}
 
 teacher:
   num_envs: 16

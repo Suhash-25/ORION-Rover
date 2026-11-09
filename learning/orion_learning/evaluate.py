@@ -1,9 +1,12 @@
 """Evaluate controllers over the sandbox cells in simulation (SPEC section 8, sim analogue).
 
-Cells: {light, heavy} x {packed, loose} (env.CELL_* parameter sets) at g = 9.81 and again at
-g = 1.62. Every controller sees the same seeds per cell (common random numbers). Writes
+Cells: {light, heavy} x {packed, loose} (env.CELL_* parameter sets), plus 'spec', the SPEC
+section 6 randomised distribution (env.spec_eval_config, the evaluation distribution; council
+B1), each at g = 9.81 and again at g = 1.62. The non-cell settings (noise, latency, model-form
+randomisation) come from base, by default spec_eval_config(). Every controller sees the same
+seeds per cell (common random numbers). Writes
 <out>/eval_episodes.csv (one row per trial) and <out>/eval_summary.csv with success rate,
-entrapment rate (belly-out or hard-stuck), and effective speed.
+entrapment rate (belly-out or ENTRAPPED by the orion_safety rule), and effective speed.
 
 Effective speed of a trial = forward progress / trial time, where trial time is the
 time-to-goal for a success and the full 60 s otherwise (a trapped rover keeps the clock
@@ -16,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +31,8 @@ from orion_learning.checkpoints import FILES, load_actor_critic, load_controller
 from orion_learning.history import History
 
 GRAVITIES = (9.81, 1.62)
+SPEC_CELL = 'spec'
+EVAL_CELLS = E.CELLS + (SPEC_CELL,)
 ALL_CONTROLLERS = ('B0', 'B2', 'student', 'student+critic', 'teacher')
 
 
@@ -87,9 +93,23 @@ def make_controller(name: str, n: int, run_dir: Path | None):
     raise ValueError(name)
 
 
+def eval_config(cell: str, gravity: float, base: E.EnvConfig | None = None) -> E.EnvConfig:
+    """Return the EnvConfig of an evaluation cell at fixed gravity (m/s^2).
+
+    base defaults to spec_eval_config().
+    """
+    base = base or E.spec_eval_config()
+    if cell == SPEC_CELL:
+        return replace(E.spec_eval_config(base), gravity=(gravity, gravity))
+    return E.cell_config(cell, gravity, base)
+
+
 def run_trials(controller_name: str, cell: str, gravity: float, trials: int, seed: int,
-               run_dir: Path | None = None, base: E.EnvConfig | None = None) -> list[dict]:
-    env = E.OrionEnv(trials, E.cell_config(cell, gravity, base), seed=seed, auto_reset=False)
+               run_dir: Path | None = None, base: E.EnvConfig | None = None,
+               config: E.EnvConfig | None = None) -> list[dict]:
+    """Run `trials` episodes of one controller; config overrides eval_config(cell, ...)."""
+    cfg = config or eval_config(cell, gravity, base)
+    env = E.OrionEnv(trials, cfg, seed=seed, auto_reset=False)
     obs, info = env.reset()
     ctl = make_controller(controller_name, trials, run_dir)
     outcome = np.full(trials, 'timeout', dtype=object)
@@ -142,16 +162,16 @@ def write_csv(path: Path, rows: list[dict]) -> None:
 
 
 def evaluate(controllers, trials: int, out_dir: Path, run_dir: Path | None = None,
-             seed: int = 12345, gravities=GRAVITIES, base: E.EnvConfig | None = None
-             ) -> list[dict]:
-    """Run every controller over CELLS x gravities and write the CSVs.
+             seed: int = 12345, gravities=GRAVITIES, base: E.EnvConfig | None = None,
+             cells=EVAL_CELLS) -> list[dict]:
+    """Run every controller over cells x gravities and write the CSVs.
 
-    base supplies the non-cell settings (episode length, noise, latency) and defaults to the
-    training EnvConfig.
+    base supplies the non-cell settings (episode length, noise, latency, model-form
+    randomisation) and defaults to the SPEC evaluation distribution, spec_eval_config().
     """
     rows = []
     for g_i, g in enumerate(gravities):
-        for c_i, cell in enumerate(E.CELLS):
+        for c_i, cell in enumerate(cells):
             cell_seed = seed + 100 * g_i + c_i      # same seed for every controller
             for name in controllers:
                 rows += run_trials(name, cell, g, trials, cell_seed, run_dir, base)
