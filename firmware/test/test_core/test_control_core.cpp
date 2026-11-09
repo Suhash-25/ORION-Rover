@@ -40,6 +40,20 @@ TEST(Pid, IntegratorDoesNotWindUpWhileSaturated)
   EXPECT_LT(u, 1.0f);
 }
 
+TEST(Pid, IntegratorHoldsWhenOtherTermsAlreadySaturate)
+{
+  // Feed-forward alone saturates the output; integrating anyway (even with the integrator
+  // clamped to the limit) would keep the output pinned after the target becomes reachable.
+  orion_fw::Pid pid;
+  const orion_fw::PidGains g{0.0f, 10.0f, 0.0f, 0.1f};
+  for (int i = 0; i < 1000; ++i) {
+    pid.update(g, 10.0f, 0.0f, 0.005f, 1.0f);
+  }
+  EXPECT_NEAR(pid.integral(), 0.0f, 1e-6f);
+  const float u = pid.update(g, 5.0f, 4.5f, 0.005f, 1.0f);
+  EXPECT_NEAR(u, 0.5f + 10.0f * 0.5f * 0.005f, 1e-4f);
+}
+
 TEST(Pid, ResetClearsState)
 {
   orion_fw::Pid pid;
