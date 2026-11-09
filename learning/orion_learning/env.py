@@ -195,7 +195,11 @@ class EnvConfig:
     noise_effort_frac: float = 0.03     # x tau_max
     noise_accel: float = 0.1            # m/s^2
     noise_gyro: float = 0.02            # rad/s
-    noise_speed_fix: float = 0.03       # m/s
+    # m/s, 1 sigma. Was 0.03 = the stuck threshold itself, so a rover at rest read below it only
+    # ~85 % of steps and the 3 s stuck hold almost never completed (FIX-B: 1.6 % flagged in
+    # 30 s). The runtime estimator's speed error on the golden replay is 0.0075 m/s RMS;
+    # 0.015 keeps 2x margin and lets the monitor rule fire (100 % flagged, median 3.1 s).
+    noise_speed_fix: float = 0.015
     accel_bias_rw: float = 0.02         # m/s^2 per sqrt(s)
     p_fix_dropout: float = 0.3          # probability an episode has fix dropouts
     dropout_rate_hz: float = 0.1        # dropout onsets per second in such an episode

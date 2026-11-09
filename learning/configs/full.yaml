@@ -38,14 +38,14 @@ student:                       # 40 x 512 x 1000 = 20 M steps of DAgger data col
   beta0: 1.0
   max_dataset: 300000
 
-critic:                        # ~60 k labelled states, x4 branches x 200 steps = ~50 M steps
+critic:                        # ~60 k labelled states, x5 branches x 200 steps = ~50 M steps
   num_envs: 512
   rollout_steps: 1200
   sample_every: 60
   warmup_steps: 40
   rounds: 6
   holdout_rounds: 2
-  branches: 4
+  branches: 5   # one per escape manoeuvre in orion_learning.escape_library.E
   horizon_s: 10.0
   epochs: 40
   batch_size: 1024

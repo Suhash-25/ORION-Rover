@@ -25,13 +25,11 @@ def test_rows_are_obs_and_executed_command_oldest_first_zero_padded():
     assert not h.buffer[0].any() and h.buffer[1].any()
 
 
-def test_raw_policy_action_is_ignored_with_a_warning():
+def test_push_takes_no_action_argument():
+    """The executed command comes from obs only; a raw policy action cannot be pushed."""
     h = History(1)
-    obs = np.zeros(S.OBS_DIM, np.float32)
-    History._warned = False
-    with pytest.warns(DeprecationWarning):
-        h.push(obs, np.array([0.9, -0.9]))
-    assert not h.buffer[0, -1, S.OBS_DIM:].any()
+    with pytest.raises(TypeError):
+        h.push(np.zeros(S.OBS_DIM, np.float32), np.array([0.9, -0.9]))
 
 
 def test_env_history_action_is_the_rate_limited_command_not_the_policy_output():

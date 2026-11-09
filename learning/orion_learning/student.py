@@ -103,7 +103,7 @@ def train_student(teacher: ActorCritic, env_cfg: EnvConfig, cfg: StudentConfig, 
     hist = History(cfg.num_envs)
     gate = CriticGate(cfg.num_envs)
     risk = SurrogateRisk(cfg.num_envs, cfg.gate_p_active, cfg.gate_hold_s, rng)
-    prev_action = np.zeros((cfg.num_envs, S.ACTION_DIM), np.float32)
+    stuck = None
     data_h: list[np.ndarray] = []
     data_z: list[np.ndarray] = []
 
@@ -112,14 +112,14 @@ def train_student(teacher: ActorCritic, env_cfg: EnvConfig, cfg: StudentConfig, 
         stats = EpisodeStats()
         sq_err, modes = [], []
         for _ in range(cfg.steps_per_iter):
-            h = hist.push(obs, prev_action)
+            h = hist.push(obs)
             with torch.no_grad():
                 z_t = teacher.latent(torch.as_tensor(priv))
                 z_s = adapter(torch.as_tensor(h))
                 use_teacher = torch.as_tensor(rng.random(cfg.num_envs) < beta)[:, None]
                 z_act = torch.where(use_teacher, z_t, z_s)
                 action = teacher.policy(torch.as_tensor(obs), z_act).numpy()
-            action, mode = gate.gate(obs, action, risk())
+            action, mode = gate.gate(obs, action, risk(), stuck)
             modes.append(mode)
             sq_err.append(((z_s - z_t) ** 2).mean(-1).numpy())
             data_h.append(h.copy())
@@ -128,12 +128,11 @@ def train_student(teacher: ActorCritic, env_cfg: EnvConfig, cfg: StudentConfig, 
             done = term | trunc
             stats.add(info, done)
             priv = info['privileged']
-            prev_action = action.astype(np.float32)     # the gated action actually sent
+            stuck = info['soft_stuck'] & ~done      # a reset rover starts unstuck
             if done.any():
                 hist.reset(done)
                 gate.reset(done)
                 risk.reset(done)
-                prev_action[done] = 0.0
 
         # Keep the most recent max_dataset samples (DAgger aggregation).
         H = np.concatenate(data_h)[-cfg.max_dataset:]

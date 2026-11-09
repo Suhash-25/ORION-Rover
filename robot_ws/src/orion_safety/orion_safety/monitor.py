@@ -155,7 +155,9 @@ class _Held:
             return False
         if self.since is None:
             self.since = now
-        return now - self.since >= self.duration
+        # 1e-9 s tolerance: with float stamps k * 0.05 a hold of exactly `duration` can come
+        # out as 2.9999999999999982 s and fire one tick late (found by the env golden test).
+        return now - self.since >= self.duration - 1e-9
 
 
 class _Input:

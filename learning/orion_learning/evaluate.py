@@ -41,7 +41,7 @@ class _B0:
         self.c = B0Controller(n)
 
     def act(self, obs, info):
-        return self.c.act(obs)
+        return self.c.act(obs, info.get('soft_stuck'))   # monitor-rule FLAG_STUCK, as on the rover
 
 
 class _Learned:
@@ -50,13 +50,12 @@ class _Learned:
     def __init__(self, n, policy, adapter=None, critic=None, encoder=None):
         self.policy, self.adapter, self.critic, self.encoder = policy, adapter, critic, encoder
         self.hist = History(n)
-        self.prev = np.zeros((n, 2), np.float32)
         self.gate = CriticGate(n) if critic is not None else None
         self.modes = []
 
     @torch.no_grad()
     def act(self, obs, info):
-        h = self.hist.push(obs, self.prev)
+        h = self.hist.push(obs)
         o = torch.as_tensor(obs)
         if self.adapter is not None:
             z = self.adapter(torch.as_tensor(h))
@@ -67,9 +66,8 @@ class _Learned:
         a = self.policy(o, z).numpy()
         if self.gate is not None:
             rho = self.critic(o, z).numpy()[:, 0]
-            a, mode = self.gate.gate(obs, a, rho)
+            a, mode = self.gate.gate(obs, a, rho, info.get('soft_stuck'))
             self.modes.append(mode)
-        self.prev = a.astype(np.float32)   # history holds the action actually sent
         return a
 
 

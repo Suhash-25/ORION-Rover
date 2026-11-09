@@ -30,6 +30,7 @@ import torch
 
 from orion_learning import obs_spec as S
 from orion_learning.baselines import B0Controller, CriticGate
+from orion_learning.escape_library import E
 from orion_learning.env import DT, EnvConfig, HARD_STUCK_WINDOW_S, OrionEnv
 from orion_learning.history import History
 from orion_learning.nets import RiskCritic, TCNAdapter
@@ -47,7 +48,7 @@ class CriticConfig:
     warmup_steps: int = 40        # don't sample before the history is full
     rounds: int = 4               # collection rounds on training seeds
     holdout_rounds: int = 2       # rounds on held-out seeds (half calibration, half test)
-    branches: int = 4             # K
+    branches: int = len(E)        # K: one branch per escape manoeuvre in E
     horizon_s: float = 10.0       # T_h
     epochs: int = 30
     batch_size: int = 512
@@ -76,10 +77,12 @@ def branch_labels(env_cfg: EnvConfig, snapshot: dict, branches: int, horizon_s: 
     # The first observation only feeds B0's governor and stuck timers, which the running
     # escape overrides, so zeros stand in for the (unstored) snapshot observation.
     obs = np.zeros((m, S.OBS_DIM), np.float32)
+    stuck = None      # env's monitor-rule FLAG_STUCK, fed back like orion_safety on the rover
     failed = np.zeros(m, dtype=bool)
     ended = np.zeros(m, dtype=bool)
     for _ in range(int(round((horizon_s + HARD_STUCK_WINDOW_S + LABEL_SLACK_S) / DT))):
-        obs, _, term, _, info = env.step(ctl.act(obs))
+        obs, _, term, _, info = env.step(ctl.act(obs, stuck))
+        stuck = info['soft_stuck']
         event = (info['belly_out'] | info['hard_stuck']) & ~ended
         failed |= event & (info['entrapment_time'] <= deadline)
         ended |= term
@@ -103,15 +106,15 @@ def collect(teacher: ActorCritic, adapter: TCNAdapter, env_cfg: EnvConfig, cfg: 
     gate = CriticGate(cfg.num_envs)
     risk = SurrogateRisk(cfg.num_envs, cfg.gate_p_active, cfg.gate_hold_s,
                          np.random.default_rng(seed))
-    prev_action = np.zeros((cfg.num_envs, S.ACTION_DIM), np.float32)
+    stuck = None
     since_reset = np.zeros(cfg.num_envs, dtype=np.int64)
     X, Z, Y, modes = [], [], [], []
     for t in range(cfg.rollout_steps):
-        h = hist.push(obs, prev_action)
+        h = hist.push(obs)
         with torch.no_grad():
             z_hat = adapter(torch.as_tensor(h))
             action = teacher.policy(torch.as_tensor(obs), z_hat).numpy()
-        action, mode = gate.gate(obs, action, risk())
+        action, mode = gate.gate(obs, action, risk(), stuck)
         modes.append(mode)
         if t % cfg.sample_every == 0:
             ok = since_reset >= cfg.warmup_steps
@@ -124,15 +127,14 @@ def collect(teacher: ActorCritic, adapter: TCNAdapter, env_cfg: EnvConfig, cfg: 
                 X.append(obs[rows])
                 Z.append(z_hat.numpy()[rows])
                 Y.append(y)
-        obs, _, term, trunc, _ = env.step(action)
+        obs, _, term, trunc, info = env.step(action)
         done = term | trunc
-        prev_action = action.astype(np.float32)     # the gated action actually sent
+        stuck = info['soft_stuck'] & ~done      # a reset rover starts unstuck
         since_reset = np.where(done, 0, since_reset + 1)
         if done.any():
             hist.reset(done)
             gate.reset(done)
             risk.reset(done)
-            prev_action[done] = 0.0
     cat = lambda xs, d: np.concatenate(xs) if xs else np.zeros((0,) + d, np.float32)  # noqa
     return (cat(X, (S.OBS_DIM,)), cat(Z, (S.LATENT_DIM,)), cat(Y, ()),
             mode_fractions(modes))

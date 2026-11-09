@@ -36,7 +36,7 @@ critic:
   warmup_steps: 40
   rounds: 1
   holdout_rounds: 1
-  branches: 4
+  branches: 5   # one per escape manoeuvre in orion_learning.escape_library.E
   horizon_s: 10.0
   epochs: 5
   hidden: [16, 16]

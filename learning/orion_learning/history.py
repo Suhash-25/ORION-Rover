@@ -15,7 +15,6 @@ buffer (which therefore includes obs_t), then the policy on (obs_t, latent).
 
 from __future__ import annotations
 
-import warnings
 
 import numpy as np
 
@@ -33,8 +32,6 @@ def executed_action(obs) -> np.ndarray:
 class History:
     """History buffers of N rovers, float32 array (N, HISTORY_LEN, OBS_DIM + ACTION_DIM)."""
 
-    _warned = False      # the deprecated prev_action argument is reported once per process
-
     def __init__(self, num_envs: int = 1):
         self.buffer = np.zeros((num_envs, S.HISTORY_LEN, WIDTH), dtype=np.float32)
 
@@ -42,18 +39,12 @@ class History:
         """Zero the history of the rovers in mask (all if None), e.g. at episode start."""
         self.buffer[slice(None) if mask is None else mask] = 0.0
 
-    def push(self, obs, prev_action=None) -> np.ndarray:
+    def push(self, obs) -> np.ndarray:
         """Append [obs, executed_action(obs)] per rover (dropping the oldest); return the buffer.
 
-        prev_action is accepted only for callers written before the convention was fixed and is
-        IGNORED (with a DeprecationWarning): the executed command comes from obs. TEMPORARY until
-        student.py, risk.py and evaluate.py call push(obs).
+        The action column is derived from obs (its prev_cmd channels), never passed in, so the
+        env and the rover cannot disagree about which command was executed (council B2).
         """
-        if prev_action is not None and not History._warned:
-            History._warned = True
-            warnings.warn('History.push(obs, prev_action): prev_action is ignored, the row holds '
-                          'the executed command obs[prev_cmd]; call push(obs)',
-                          DeprecationWarning, stacklevel=2)
         obs = np.atleast_2d(np.asarray(obs, dtype=np.float32))
         if obs.shape != (len(self.buffer), S.OBS_DIM):
             raise ValueError(f'obs has shape {obs.shape}, expected ({len(self.buffer)}, '
