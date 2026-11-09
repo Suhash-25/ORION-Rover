@@ -22,6 +22,7 @@
   <test_depend>std_msgs</test_depend>
   <test_depend>orion_msgs</test_depend>
   <test_depend>orion_safety</test_depend>
+  <test_depend>orion_policy</test_depend>
   <test_depend>orion_bringup</test_depend>
   <test_depend>navigation2</test_depend>
 

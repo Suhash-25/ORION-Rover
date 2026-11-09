@@ -4,9 +4,8 @@ The test publishes a nominal SafetyStatus and, when nothing else publishes it ye
 synthetic TerrainState (orion_terrain is developed in parallel). orion_policy must then
 drive: odometry advances for 10 s and PolicyStatus reports MODE_BASELINE.
 
-TEMPORARY (integrator): twist_mux is not wired in this branch, so /cmd_vel/policy is remapped
-straight to /diff_drive_controller/cmd_vel below. Remove the remapping once twist_mux is in
-the bringup.
+The policy publishes on /cmd_vel/policy and reaches the wheels through twist_mux (priority
+100), exactly as on the robot; CMD_TOPIC is twist_mux's output.
 
 Run with: colcon test --packages-select orion_sim_tests --ctest-args -R test_policy
 """
@@ -45,8 +44,6 @@ def generate_test_description():
         package='orion_policy', executable='policy_node', name='orion_policy',
         output='screen',
         parameters=[{'initial_mode': 'BASELINE', 'use_sim_time': True}],
-        # TEMPORARY until twist_mux is in the bringup (see module docstring).
-        remappings=[('/cmd_vel/policy', CMD_TOPIC)],
     )
     return launch.LaunchDescription([
         include_bringup('gazebo.launch.py'),
