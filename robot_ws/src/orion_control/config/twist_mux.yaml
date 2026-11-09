@@ -38,5 +38,13 @@ twist_mux:
     locks:
       estop:        # std_msgs/Bool; true masks every input below priority 255
         topic: /orion/estop
+        # 0.0 = the lock never expires: it acts on the last value received, so it is
+        # FAIL-OPEN for a dead e-stop publisher (one that died after sending false, or never
+        # started, leaves every input unmasked). With a timeout > 0 twist_mux treats an
+        # expired lock as locked (fail-safe), but /orion/estop is published once by hand
+        # today (`ros2 topic pub --once`), so any timeout would lock the rover for good
+        # 0.5 s after every release. Set 0.5 once an e-stop driver republishes /orion/estop
+        # at >= 10 Hz (council m2; docs/SAFETY.md). Until then a dead e-stop publisher is
+        # not detected by anything; the physical e-stop is the stop that does not need it.
         timeout: 0.0
         priority: 255
