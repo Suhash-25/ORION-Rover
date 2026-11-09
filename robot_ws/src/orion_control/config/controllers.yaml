@@ -61,4 +61,11 @@ diff_drive_controller:
 
     cmd_vel_timeout: 0.5
 
-    use_stamped_vel: false
+    # Jazzy's diff_drive_controller only accepts geometry_msgs/TwistStamped
+    # on /diff_drive_controller/cmd_vel. Every command source must publish
+    # stamped messages (see docs/INTERFACES.md).
+
+    # Skid-steer: the 4 wheels scrub when turning, so the effective track is
+    # wider than the geometric one. Tune on the real rover with a 360 deg
+    # spin test (docs/BRINGUP.md). 1.0 = no correction.
+    wheel_separation_multiplier: 1.0

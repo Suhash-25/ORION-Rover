@@ -2,13 +2,16 @@
 
 import os
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription
+from launch.actions import RegisterEventHandler
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-
-from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
@@ -50,7 +53,8 @@ def generate_launch_description():
     teleop = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(control_share, "launch", "teleop.launch.py")
-        )
+        ),
+        condition=IfCondition(LaunchConfiguration("teleop")),
     )
 
     def start_teleop_after_success(event, _context):
@@ -58,6 +62,11 @@ def generate_launch_description():
         return [teleop] if event.returncode == 0 else []
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            "teleop",
+            default_value="true",
+            description="Open the keyboard teleop terminal (needs a desktop)",
+        ),
         joint_state_broadcaster,
         RegisterEventHandler(
             OnProcessExit(
