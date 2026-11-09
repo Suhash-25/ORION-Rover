@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>orion_hardware</name>
+  <version>0.1.0</version>
+  <description>
+    ros2_control SystemInterface for the ORION rover wheel firmware (COBS + CRC-16 serial
+    protocol), a Python reference of the protocol and a fake firmware for tests.
+  </description>
+  <maintainer email="suhasacharya0525@gmail.com">suhash</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <depend>hardware_interface</depend>
+  <depend>orion_msgs</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>std_msgs</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <!-- Integration test: real controller_manager + diff_drive_controller on a socat PTY. -->
+  <test_depend>ament_index_python</test_depend>
+  <test_depend>controller_manager</test_depend>
+  <test_depend>controller_manager_msgs</test_depend>
+  <test_depend>diff_drive_controller</test_depend>
+  <test_depend>geometry_msgs</test_depend>
+  <test_depend>joint_state_broadcaster</test_depend>
+  <test_depend>orion_control</test_depend>
+  <test_depend>orion_description</test_depend>
+  <test_depend>python3-yaml</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>robot_state_publisher</test_depend>
+  <test_depend>sensor_msgs</test_depend>
+  <test_depend>socat</test_depend>
+  <test_depend>xacro</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

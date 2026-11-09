@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Run the fake ORION firmware on a serial device (see orion_hardware_py/fake_firmware.py)."""
+
+import sys
+
+from orion_hardware_py.fake_firmware import main
+
+if __name__ == '__main__':
+    sys.exit(main())
