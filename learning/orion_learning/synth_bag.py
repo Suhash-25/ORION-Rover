@@ -83,6 +83,15 @@ class _Msgs:
         return self.ts.serialize_cdr(msg, msgtype)
 
 
+def rollout_config(cell: str | None, gravity: float = 9.81,
+                   force_dropouts: bool = False) -> E.EnvConfig:
+    """EnvConfig of the rollout write_bag records (replay tests re-run it with this)."""
+    cfg = E.cell_config(cell, gravity) if cell else E.EnvConfig()
+    if force_dropouts:
+        cfg = replace(cfg, p_fix_dropout=1.0, dropout_rate_hz=0.5, dropout_duration_s=(0.5, 2.0))
+    return cfg
+
+
 def write_bag(out: Path, cell: str | None = 'light-loose', seconds: float = 20.0, seed: int = 0,
               gravity: float = 9.81, storage: str = 'sqlite3', force_dropouts: bool = False,
               overwrite: bool = False) -> dict:
@@ -97,9 +106,7 @@ def write_bag(out: Path, cell: str | None = 'light-loose', seconds: float = 20.0
         if not overwrite:
             raise FileExistsError(out)
         shutil.rmtree(out)
-    cfg = E.cell_config(cell, gravity) if cell else E.EnvConfig()
-    if force_dropouts:
-        cfg = replace(cfg, p_fix_dropout=1.0, dropout_rate_hz=0.5, dropout_duration_s=(0.5, 2.0))
+    cfg = rollout_config(cell, gravity, force_dropouts)
     env = E.OrionEnv(1, cfg, seed=seed, auto_reset=False, record_substeps=True)
     obs, _ = env.reset()
     ctl = B0Controller(1)
@@ -134,7 +141,9 @@ def write_bag(out: Path, cell: str | None = 'light-loose', seconds: float = 20.0
                 w.write(conns['joint_states'], ns, m.ser(js, TOPICS['joint_states'][1]))
                 counts['joint_states'] += 1
 
-                roll, pitch = float(sub['roll'][0]), float(sub['pitch'][0])
+                # The IMU frame carries the episode's mounting bias, as env.measured_tilt.
+                roll = float(sub['roll'][0] + env.state['imu_bias'][0, 0])
+                pitch = float(sub['pitch'][0] + env.state['imu_bias'][0, 1])
                 yaw = float(sub['pose'][0, 2])
                 g = float(env.state['g'][0])
                 bias += rng.normal(0, cfg.accel_bias_rw * np.sqrt(E.DT_SUB), 3)

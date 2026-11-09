@@ -2,13 +2,14 @@
 Golden replay (SPEC F7, council M4): a learning-env rollout as a rosbag2 through the runtime.
 
 orion_learning.synth_bag writes a small bag of a B0 rollout in the heavy-loose cell (80 Hz
-joint states and IMU, 20 Hz overhead-camera poses with fix dropouts, truth.csv). The bag goes
+joint states and IMU, 20 Hz overhead-camera poses with forced fix dropouts of 0.5-2 s,
+truth.csv); B0 reaches the goal line after about 7 s. The bag goes
 through the runtime TerrainEstimator (with the env's effort model) and orion_policy's
 ObservationBuilder, evaluated at each truth.csv control step exactly as the nodes would. The
 same rollout is re-run in the env (it is deterministic in its seed) to get the env's own
 observation rows.
 
-The rollout has a 5.5 s camera dropout. Slip, body speed and the observation are compared on
+The camera drops out repeatedly. Slip, body speed and the observation are compared on
 the steps with a settled speed fix (a fix in every 0.1 s of the last second, after a 1 s
 warm-up): during the dropout both sides dead-reckon on independent IMU noise and diverge, and
 both say so with speed confidence 0 (checked). Checked:
@@ -50,17 +51,24 @@ TOLERANCE = {                       # per-field RMS(runtime - env), normalised o
 # noisier one (measured RMS 0.05 / 0.057 normalised).
 
 
-def env_effort_model() -> EffortModel:
-    """Return the env's SIM_EFFORT_MODEL as a runtime (calibrated, SIM_TORQUE) model."""
+def env_effort_model(i_ref_factor: float) -> EffortModel:
+    """
+    Return the env's SIM_EFFORT_MODEL as a runtime (calibrated, SIM_TORQUE) model.
+
+    The env draws the rover's true I_ref per episode (council m6); the runtime model is the
+    calibration of that rover, so it gets the episode's I_ref.
+    """
     m = E.SIM_EFFORT_MODEL
-    return EffortModel(coefficients=np.tile(m.coefficients, (4, 1)), i_ref=m.ref,
+    return EffortModel(coefficients=np.tile(m.coefficients, (4, 1)), i_ref=m.ref * i_ref_factor,
                        effort_unit='N.m', effort_source=EffortSource.SIM_TORQUE, calibrated=True)
 
 
 def env_rollout():
-    """Re-run the rollout synth_bag recorded; returns the env's obs rows (k, OBS_DIM)."""
-    env = E.OrionEnv(1, E.cell_config(CELL), seed=SEED, auto_reset=False, record_substeps=True)
+    """Re-run the rollout synth_bag recorded; returns (env obs rows (k, OBS_DIM), I_ref factor)."""
+    env = E.OrionEnv(1, synth_bag.rollout_config(CELL, force_dropouts=True), seed=SEED,
+                     auto_reset=False, record_substeps=True)
     obs, _ = env.reset()
+    factor = float(env.state['i_ref_factor'][0])
     ctl = B0Controller(1)
     rows = []
     for _ in range(int(round(SECONDS / E.DT))):
@@ -68,19 +76,20 @@ def env_rollout():
         rows.append(obs[0])
         if term[0] or trunc[0]:
             break
-    return np.array(rows)
+    return np.array(rows), factor
 
 
 @pytest.fixture(scope='module')
 def replay(tmp_path_factory):
     bag = tmp_path_factory.mktemp('golden') / 'bag'
-    synth_bag.write_bag(bag, CELL, SECONDS, seed=SEED)
+    synth_bag.write_bag(bag, CELL, SECONDS, seed=SEED, force_dropouts=True)
     with open(bag / 'truth.csv') as f:
         truth = list(csv.DictReader(f))
     topics = {DEFAULT_TOPICS[r]: r for r in ('joint_states', 'imu', 'ground_truth_pose')}
     msgs = sorted(read_bag(str(bag), list(topics)), key=lambda m: (m[0], m[1]))
 
-    est = TerrainEstimator(effort_model=env_effort_model(), sim=True)
+    env_obs, i_ref_factor = env_rollout()
+    est = TerrainEstimator(effort_model=env_effort_model(i_ref_factor), sim=True)
     builder = ObservationBuilder(DEFAULT_JOINT_NAMES, effort_max=E.sim_effort_max)
     estimates, obs = [], []
     i = 0
@@ -102,7 +111,6 @@ def replay(tmp_path_factory):
         builder.update_terrain(stamp, e.body_speed, e.confidence, e.slip_side, e.sinkage_proxy)
         estimates.append(e)
         obs.append(builder.build(stamp, (float(row['cmd_v']), float(row['cmd_w']))))
-    env_obs = env_rollout()
     assert len(env_obs) == len(truth), 'the env re-run must be the rollout in the bag'
     warm = np.array([float(r['t']) >= WARMUP_S for r in truth])
     fresh = np.array([e.time_since_fix <= 0.1 + 1e-6 for e in estimates])
@@ -117,7 +125,8 @@ def rms(x):
 
 def test_rollout_is_long_and_eventful_enough(replay):
     truth, estimates, obs, env_obs, _, settled = replay
-    assert len(truth) >= 0.75 * SECONDS * S.CONTROL_HZ
+    # B0 reaches the goal line after about 7 s (the episode ends there) or runs SECONDS.
+    assert len(truth) >= 6.0 * S.CONTROL_HZ
     assert max(e.sinkage_proxy for e in estimates) > 0.1, 'loose soil must load the wheels'
     assert 0.15 < settled.mean() < 0.9, 'needs both settled fixes and a dropout'
     # Deep in the dropout (>= 1.5 s without a fix, camera still blind): both sides at c ~ 0.
