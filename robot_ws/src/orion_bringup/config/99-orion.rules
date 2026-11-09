@@ -1,0 +1,17 @@
+# udev rule: a stable name for the ORION wheel firmware (docs/BRINGUP.md section 0).
+#
+# /dev/ttyACM0 can become ttyACM1 after a replug or when another USB serial device is present.
+# This rule names the board by its USB serial number, so the launch argument stays fixed:
+#   ros2 launch orion_bringup robot.launch.py port:=/dev/orion_fw
+#
+# Install (once per host):
+#   1. Find the serial number with the board plugged in:
+#        udevadm info -a -n /dev/ttyACM0 | grep -m1 '{serial}'
+#   2. Replace REPLACE_WITH_SERIAL below (and the IDs if the board is not a Teensy).
+#   3. sudo cp 99-orion.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules
+#      && sudo udevadm trigger
+#   4. ls -l /dev/orion_fw   (pass: a link to ttyACM*). The user must be in group dialout.
+#
+# 16c0:0483 is a Teensy 4.1 in USB Serial mode (the default board, docs/HARDWARE.md section A).
+# ModemManager probes new ACM devices and can send bytes to the firmware: tell it to ignore it.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="0483", ATTRS{serial}=="REPLACE_WITH_SERIAL", SYMLINK+="orion_fw", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"

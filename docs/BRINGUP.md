@@ -15,8 +15,17 @@ replace them with measurements.
 - The IMU and lidar drivers depend on the hardware list (docs/HARDWARE.md). Until they exist,
   orion_safety HALTs 10 s after start because `/imu/data` never arrives; that is intended.
 
+- Give the firmware board a stable name: install the udev rule
+  `robot_ws/src/orion_bringup/config/99-orion.rules` (instructions inside; it links
+  `/dev/orion_fw` by USB serial number) and check `ls -l /dev/orion_fw`.
+- The drive-train values are launch arguments of `robot.launch.py`, forwarded to the xacro:
+  `port`, `baud`, `encoder_cpr`, `gear_ratio`, `kt`, `motor_resistance`, `brake_on_idle`
+  (defaults are the GUESSES in `ros2_control.xacro`; `ros2 launch orion_bringup robot.launch.py
+  --show-args` lists them). Steps 3 and 5 replace the guesses with measurements.
+
 ```bash
-ros2 launch orion_bringup robot.launch.py \
+ros2 launch orion_bringup robot.launch.py port:=/dev/orion_fw \
+  encoder_cpr:=<counts> gear_ratio:=<ratio> motor_resistance:=<ohm> \
   imu_launch:=/path/to/imu_driver.launch.py lidar_launch:=/path/to/lidar_driver.launch.py
 ros2 control list_controllers      # pass: joint_state_broadcaster and diff_drive_controller active
 ros2 topic echo /orion/safety_status --field state   # pass: 0 (NOMINAL)

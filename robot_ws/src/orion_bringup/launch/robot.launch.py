@@ -7,6 +7,10 @@ orion_control/config/controllers.yaml, the controller spawners, twist_mux and or
 which is not decided yet (docs/HARDWARE.md): pass their launch files as imu_launch:=... and
 lidar_launch:=... . Without an IMU driver orion_safety HALTs after its startup grace,
 by design: the rover must not drive without tilt protection.
+
+The drive-train values (port, baud, encoder_cpr, gear_ratio, kt, motor_resistance,
+brake_on_idle) are launch arguments forwarded to the xacro; their defaults are the GUESSES of
+orion_description/urdf/control/ros2_control.xacro (test_robot_launch checks they agree).
 """
 
 import os
@@ -25,6 +29,27 @@ from launch.substitutions import LaunchConfiguration
 from launch.substitutions import PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+
+# xacro argument -> (default, description). Defaults equal ros2_control.xacro.
+DRIVE_ARGS = {
+    "port": ("/dev/ttyACM0", "Serial device of the wheel firmware, e.g. /dev/orion_fw "
+                             "(udev rule: orion_bringup/config/99-orion.rules)"),
+    "baud": ("921600", "Serial baud rate (ignored by USB CDC devices)"),
+    "encoder_cpr": ("2048", "Decoder counts per motor revolution after x4 decoding (GUESS)"),
+    "gear_ratio": ("30", "Motor revolutions per wheel revolution (GUESS)"),
+    "kt": ("0.0", "Motor torque constant N m/A; 0 disables back-EMF correction"),
+    "motor_resistance": ("0.5", "Motor terminal resistance, ohm (GUESS)"),
+    "brake_on_idle": ("false", "Short the motors when idle instead of coasting"),
+}
+
+
+def robot_description_command(xacro_file):
+    """Build the xacro Command with hardware:= and every DRIVE_ARGS launch argument forwarded."""
+    parts = ["xacro ", xacro_file, " hardware:=", LaunchConfiguration("hardware")]
+    for name in DRIVE_ARGS:
+        parts += [f" {name}:=", LaunchConfiguration(name)]
+    return Command(parts)
 
 
 def _given(arg):
@@ -55,8 +80,7 @@ def generate_launch_description():
 
     xacro_file = os.path.join(description_pkg, "urdf", "robot", "orion.urdf.xacro")
     robot_description = ParameterValue(
-        Command(["xacro ", xacro_file, " hardware:=", LaunchConfiguration("hardware")]),
-        value_type=str,
+        robot_description_command(xacro_file), value_type=str,
     )
 
     robot_state_publisher = Node(
@@ -105,6 +129,8 @@ def generate_launch_description():
             choices=["serial", "gazebo"],
             description="ros2_control hardware passed to the URDF xacro (serial = orion_hardware)",
         ),
+        *[DeclareLaunchArgument(name, default_value=default, description=text)
+          for name, (default, text) in DRIVE_ARGS.items()],
         DeclareLaunchArgument(
             "teleop",
             default_value="false",

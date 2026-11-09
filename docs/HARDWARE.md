@@ -12,7 +12,7 @@ listed below with where it lives. Please answer each question (edit this file: r
 | --- | --- | --- |
 | pins, motor/encoder polarity, current-sense and battery scaling | `firmware/src/board_config.hpp` | edit, reflash |
 | a different microcontroller | `firmware/src/main.cpp` (implement `orion_fw::Hal`, ~120 lines) + `platformio.ini` env | new board file |
-| serial port, encoder CPR, gear ratio, kt, motor resistance, brake/coast | xacro args of `orion_description/urdf/control/ros2_control.xacro` (`hardware:=serial port:=... encoder_cpr:=... gear_ratio:=... kt:=... motor_resistance:=... brake_on_idle:=...`) | launch argument |
+| serial port, encoder CPR, gear ratio, kt, motor resistance, brake/coast | xacro args of `orion_description/urdf/control/ros2_control.xacro` (`hardware:=serial port:=... encoder_cpr:=... gear_ratio:=... kt:=... motor_resistance:=... brake_on_idle:=...`); `robot.launch.py` declares the same launch arguments and forwards them | launch argument |
 | wheel-to-firmware slot mapping and sign | per-joint `motor_index` / `direction` in the same xacro | edit |
 | PID gains, firmware current limit, undervoltage threshold | firmware params (docs/PROTOCOL.md section 3), defaults in `firmware/lib/orion_core/params.hpp` | edit defaults, reflash |
 | I_cont / I_peak used by the host safety rules | `orion_safety/config/safety.yaml` (owned by orion_safety) | edit |
@@ -183,7 +183,8 @@ ANSWER:
 
 **Why it matters:** ROS 2 Jazzy needs Ubuntu 24.04; the control loop runs at 100 Hz in
 `ros2_control_node`. Give the microcontroller a stable device name with a udev rule (e.g.
-`/dev/orion_fw` by USB serial number) and pass it as `port:=/dev/orion_fw`; the user needs
+`/dev/orion_fw` by USB serial number; template `orion_bringup/config/99-orion.rules`) and pass
+it as `port:=/dev/orion_fw`; the user needs
 the `dialout` group. A UART on Pi GPIO is 3.3 V and works at 921600 with `kUseUart = true`.
 
 ## J. Geometry and mass
