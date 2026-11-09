@@ -1,0 +1,3 @@
+# Python dependencies of orion_terrain without a rosdep key. CI: pip install -r this file
+# and `pip install -e learning` (orion_learning provides obs_spec).
+rosbags>=0.9
