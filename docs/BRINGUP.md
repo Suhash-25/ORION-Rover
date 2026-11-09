@@ -182,6 +182,30 @@ Pass: after 1 s of steady driving on concrete, both `slip_side` values stay with
 3 s with confidence > 0.5, and orion_safety never raises FLAG_STUCK. A biased slip (e.g. +0.1 on
 concrete) means r or the speed source is wrong: redo step 3 before trusting any sand result.
 
+## 10. IMU forward acceleration vs camera truth (council m9)
+
+Needs orion_ground_truth (overhead camera + AprilTag) running, on the trial surface, on flat
+ground. The terrain estimator predicts body speed from the IMU's forward acceleration between
+camera fixes, so a scaled or biased a_x becomes speed drift in every fix dropout. (Gazebo's IMU
+integrates 23 % low; that is a simulator artefact and is why this needs the real rover.)
+
+```bash
+ros2 bag record -s mcap -o imu_check /imu/data /orion/ground_truth_pose
+# in another terminal, after the recording has started:
+#   1. stand still for 10 s (static bias), rover level, nobody touching it;
+#   2. drive straight at X = 0.2, W = 0 for about 10 s (2 m), then stop; Ctrl-C the recording.
+ros2 run orion_experiments imu_check imu_check     # --static-s 10 --window-s 2 are the defaults
+```
+
+The tool takes the static bias of a_x from the first 10 s (it refuses if the camera saw the
+rover move > 5 mm then), integrates (a_x - bias) over the acceleration to cruise speed (from
+0.5 s before motion to 2 s after) and divides by the camera speed at the end of that window.
+
+Pass: `PASS`, i.e. integrated IMU speed within 5 % of the camera speed; static bias within
++-0.3 m/s^2 (step 6) and the printed run length about 2 m. Fail: check the IMU's
+accelerometer range / scale setting and its mounting (`imu.xacro` rpy), then repeat. Record
+the ratio; the terrain estimator's IMU prediction is not trusted until this passes.
+
 ## Sign-off
 
 | Step | Measured | Pass? | Date / operator | Commit with config change |
@@ -197,3 +221,4 @@ concrete) means r or the speed source is wrong: redo step 3 before trusting any 
 | 7 lidar offset | x __ y __ z __ m; range error __ m; yaw __ deg | | | |
 | 8 spin multiplier | sand __ / concrete __ | | | |
 | 9 slip on concrete | mean slip L __ R __ | | | |
+| 10 IMU vs camera | bias __ m/s^2; ratio __ (pass within 0.95-1.05) | | | |

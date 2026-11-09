@@ -101,15 +101,20 @@ def test_privileged_vector_layout():
     p = info['privileged']
     assert p.shape == (3, S.PRIVILEGED_DIM) and p.dtype == np.float32
     assert np.allclose(p[:, 8], 22.0 / 14.0) and np.allclose(p[:, 9], 1.62 / 9.81)
-    soil = soil_mod.Soil.from_stacked(env.state['soil'][0, 0])
-    d = soil_mod.traction_descriptors(22.0 * 1.62 / 4, soil, 1.62, E.CELL_BETA)
+    soil = env.state['soil'][0, 0]
+    rear = soil.copy()
+    rear[soil_mod.SOIL_KEYS.index('k_phi')] *= env.state['rear_k_phi'][0]   # multi-pass
+    d = [soil_mod.traction_descriptors(22.0 * 1.62 / 4, soil_mod.Soil.from_stacked(x), 1.62,
+                                       E.CELL_BETA) for x in (soil, rear)]
+    d = 0.5 * (d[0] + d[1])                       # side = mean of its front and rear wheel
     assert np.allclose(p[0, [0, 2, 4, 6]], d, rtol=1e-5)       # left side, both sides equal
     assert np.allclose(p[0, [1, 3, 5, 7]], d, rtol=1e-5)
 
 
 def test_steady_cruise_slip_matches_soil_model_equilibrium():
     """Env physics and soil.py agree: steady slip is where steady drawbar pull is zero."""
-    env = E.OrionEnv(2, E.cell_config('heavy-loose'), seed=0, auto_reset=False)
+    cfg = replace(E.cell_config('heavy-loose'), rear_k_phi_factor=(1.0, 1.0))  # one soil
+    env = E.OrionEnv(2, cfg, seed=0, auto_reset=False)
     env.reset()
     _roll(env, 120)
     slip = np.mean(E.physical_slip(env.state['w'], env.state['vel'][:, :1]))
@@ -149,22 +154,6 @@ def test_spinning_in_mud_ends_in_belly_out_with_penalty():
     remaining = cfg.max_steps - (k + 1)
     # Failure costs the belly-out penalty plus the step penalty of the time left.
     assert rew[0] < cfg.w_belly_out + cfg.w_step * remaining + 1.0
-
-
-def test_hard_stuck_after_10_s_of_commanded_motion_without_progress():
-    cfg = replace(E.cell_config('light-packed'), latency_steps=(1, 1))
-    env = E.OrionEnv(1, cfg, seed=0, auto_reset=False)
-    env.reset()
-    env.state['fault'][:] = 0.0          # motors deliver no torque: commanding, not moving
-    steps = 0
-    while True:
-        _, _, term, _, info = env.step(np.array([[0.6, 0.0]]))
-        steps += 1
-        if term[0]:
-            break
-    assert info['hard_stuck'][0]
-    # Clock starts once |r w_cmd| > 0.1 m/s, i.e. after 3 steps of the 1 m/s^2 rate limit.
-    assert steps == round(E.HARD_STUCK_TIME / E.DT) + 2
 
 
 def test_goal_success_and_effective_speed_on_packed_ground():

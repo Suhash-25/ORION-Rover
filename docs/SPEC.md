@@ -152,18 +152,67 @@ Randomised order. Metrics: success, time-to-goal, entrapped, time-to-entrapment 
 critic calibration. Metadata: git SHA, firmware hash, ONNX sha256, obs_spec_hash, cell,
 ballast, cone depths, operator, timestamp, bag path.
 
+Failure = outcome TIMEOUT, ENTRAPPED or SAFETY (pre-registered). SAFETY includes the current
+HALT, whose threshold I_peak (12 A) is a GUESS until the motor drivers are known (section 5), so
+the report lists SAFETY outcomes per cell next to every test. Critic calibration label at time
+t (council M2): in an ENTRAPPED trial 1 if t_entrap - t <= 10 s, where t_entrap is the first
+FLAG_STUCK of the stuck episode that ended in the hard-stuck HALT (not the HALT, which comes
+~23 s after motion stops); in other trials 0 when >= 10 s of trial remain, else censored.
+
 Phase-0 kill test (pre-registered, two-stage; D-008): B0 tuned on light-packed (cell C).
 Stage 1 (pilot): 20 trials in each of the 4 cells. Early GO if for at least one loose cell the
-failure rate rises >= 0.25 over light-packed with one-sided Fisher exact p < 0.01, or median
-effective speed drops >= 30 % with Mann-Whitney p < 0.01. Stage 2 (if no early GO): extend
-light-packed (C) and light-loose (D) to 40 trials each and test C vs D once more at p < 0.04
-(same effect-size rules). GO if stage 2 passes; otherwise NO-GO and pivot to self-rescue.
-The 0.01 / 0.04 split keeps the overall false-GO rate at or below 0.05 across the two looks.
-Power for trap rates 10 % vs 40 %: about 0.49 at 20 per cell, 0.85 at 40 (paper, Sample Size).
-Main study: 4 cells x 4 controllers (B0, B2,
-student, student + critic) x 25 = 400 trials, Holm-corrected Fisher on failure rate.
+failure rate is higher than in light-packed with one-sided Fisher exact p < 0.01, or the
+effective speed is lower with one-sided Mann-Whitney p < 0.01. Stage 2 (if no early GO): extend
+light-packed (C) and light-loose (D) to 40 trials each and test C vs D once more at p < 0.04.
+GO if stage 2 passes; otherwise NO-GO and pivot to self-rescue. The effect sizes are reported
+next to the decision, descriptively: failure-rate rise with a Newcombe hybrid-score 95 % CI and
+median-speed drop with a seeded bootstrap 95 % CI. This is the council M3 rule; the switch
+`EFFECT_SIZE_GATE` in orion_experiments/analysis.py (CLI `--effect-size-gate`) restores the
+original D-008 rule, which also required a rise >= 0.25 or a drop >= 30 % (open decision,
+section 9). heavy-loose differs from light-packed in two factors (ballast and soil), so a GO
+that rests on heavy-loose alone is reported as a two-factor result: H1 is the C -> D transfer.
+
+Power and false-GO rate of the implemented rule, simulated by `ros2 run orion_experiments
+phase0_power` (20000 sessions per row, seed 20261109, Monte-Carlo SE <= 0.004; failures
+Bernoulli; a failed trial is always slower than a successful one, so the speed test only sees
+the failure counts unless successful runs also slow down on loose soil). C = light-packed,
+D = light-loose, B = heavy-loose; stage-1 early-GO probability in brackets:
+
+| rule | power, C 10 % / D 40 % / B 40 % | power, B 10 % | false GO, all cells 10 % | all 30 % |
+| --- | --- | --- | --- | --- |
+| ungated, failures only (**implemented default**; speed reported, not decisive) | 0.91 (stage 1: 0.51) | 0.89 | 0.017 | 0.029 |
+| ungated, failures + speed (`--speed-in-decision`) | 0.93 (0.58) | 0.91 | **0.062** | **0.063** |
+| ungated, every test at alpha / 2 | 0.87 (0.45) | 0.85 | 0.031 | 0.033 |
+| gated, failures + speed (`--effect-size-gate`) | 0.81 (0.55) | 0.75 | 0.002 | 0.027 |
+| gated, failures only | 0.80 (0.51) | 0.75 | 0.001 | 0.017 |
+
+The 0.01 / 0.04 split bounds the false-GO rate at 0.05 only for one test per look. The rule
+runs four tests at stage 1 (2 loose cells x 2 metrics) and two at stage 2, so the ungated rule
+with the speed test exceeds 0.05 (0.062-0.063). The failure-only or alpha / 2 variants keep it
+below 0.05, which is why the default decides on the failure rate alone (`SPEED_IN_DECISION =
+False`); effective speed is still reported with its CI. See section 9. Reference (not the implemented rule): a plain two-sided Fisher test
+at 0.05 on 10 % vs 40 % has exact power 0.49 at 20 per cell, 0.71 at 30, 0.85 at 40.
+
+Main study: 4 cells x 4 controllers (B0, B2, student, student + critic) x 25 = 400 trials.
+Primary (pre-registered, council m7): student + critic fails less often than B0, both pooled
+over light-loose and heavy-loose (50 vs 50), one-sided Fisher at 0.05, unadjusted. Secondary:
+the 4 comparisons in each of the 4 cells (16 tests), one-sided Fisher, Holm-corrected. Exact
+power at n = 25 per cell: for B0 40 % vs 20 %, 0.07 at Holm's first step (0.05 / 16) and 0.35
+unadjusted; 40 % vs 10 %: 0.29 and 0.73. The pooled primary at 50 vs 50 has 0.64 (40 % vs
+20 %) and 0.96 (40 % vs 10 %). Per-cell results are descriptive unless the effect is large.
 
 ## 9. Open decisions for the user
+
+- **Phase-0 decision rule (council M3), awaiting the user's choice.** Implemented default (b):
+  GO on the one-sided failure-rate test at 0.01 / 0.04 alone, effect sizes and speed reported
+  with CIs (`EFFECT_SIZE_GATE = False`, `SPEED_IN_DECISION = False`). Options, with the
+  simulated numbers of section 8 (power at 10 % vs 40 %, false GO under H0):
+  (a) failures + speed (`--speed-in-decision`): power 0.91-0.93, false GO 0.062-0.063, above
+  the 0.05 the design promised; (b) ungated, failure rate only (the default): power
+  0.89-0.91, false GO 0.017-0.029; (c) ungated, every test at alpha / 2: power 0.85-0.87, false
+  GO 0.031-0.033; (d) the gated D-008 rule (`--effect-size-gate`): power 0.75-0.81, false GO
+  0.002-0.027. The implementer's recommendation is (b): almost the same power as (a), and the
+  0.05 bound holds. Whatever is chosen must be fixed before the first stage-1 trial.
 
 - Ballast mass for "heavy"; I_cont / I_peak after the hardware inventory.
 - Is an overhead camera + AprilTag acceptable for ground truth? Without it, slip truth is

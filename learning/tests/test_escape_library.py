@@ -20,7 +20,7 @@ def test_every_user_plays_the_same_E():
     assert baselines.EscapeLibrary().library is EL.E
     assert baselines.B0Controller().escape.library is EL.E
     assert baselines.CriticGate().escape.library is EL.E
-    assert risk.EscapeLibrary is baselines.EscapeLibrary        # critic labels under E
+    assert risk.B0Controller is baselines.B0Controller          # critic labels under E
 
 
 def test_manoeuvre_ticks_count_ticks_per_segment():

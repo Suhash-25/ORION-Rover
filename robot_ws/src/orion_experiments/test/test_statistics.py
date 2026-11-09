@@ -3,12 +3,16 @@
 from math import comb
 
 import numpy as np
+from orion_experiments import analysis
 from orion_experiments.analysis import calibration
 from orion_experiments.analysis import fisher_one_sided
 from orion_experiments.analysis import holm
 from orion_experiments.analysis import main_study
 from orion_experiments.analysis import mannwhitney_less
+from orion_experiments.analysis import newcombe_interval
 from orion_experiments.analysis import phase0_decision
+from orion_experiments.analysis import speed_drop_interval
+from orion_experiments.analysis import wilson_interval
 import pandas as pd
 import pytest
 
@@ -94,14 +98,77 @@ def test_stage2_pools_both_stages_and_tests_light_loose_only():
 
 
 def test_stage2_no_go():
-    speeds = dict(SAME, **{'light-loose': BASE_SPEED * 0.9, 'heavy-loose': BASE_SPEED * 0.9})
-    df = pd.concat([session(STAGE1, speeds),
-                    session({'light-packed': 4, 'light-loose': 4},
-                            {c: speeds[c] for c in LIGHT}, name='phase0b')])
-    res = phase0_decision(df)  # 12/40 vs 6/40: p = 0.09
-    assert res['decision'] == 'NO-GO' and not res['go']
+    df = pd.concat([session(STAGE1, SAME),
+                    session({'light-packed': 4, 'light-loose': 4}, LIGHT, name='phase0b')])
+    res = phase0_decision(df)  # 12/40 vs 6/40: p = 0.09; speeds identical
+    assert res['decision'] == 'NO-GO' and not res['go'] and res['go_cells'] == []
+    assert phase0_decision(df, effect_size_gate=True)['decision'] == 'NO-GO'
+
+
+def test_effect_size_gate_is_off_by_default_and_switchable():
+    assert analysis.EFFECT_SIZE_GATE is False
+    # Stage 2, 12/40 vs 3/40: p = 0.0099 < 0.04, but the rise 0.225 is below 0.25.
+    rate = pd.concat([session(STAGE1, SAME),
+                      session({'light-packed': 1, 'light-loose': 4}, LIGHT, name='phase0b')])
+    res = phase0_decision(rate)
     row = res['table'].iloc[0]
-    assert row.speed_drop == pytest.approx(0.1) and not row.speed_criterion
+    assert row.fisher_p == pytest.approx(hand_fisher_greater(12, 40, 3, 40))
+    assert row.rate_rise == pytest.approx(0.225)
+    assert res['decision'] == 'GO' and not res['effect_size_gate'] and row.failure_criterion
+    gated = phase0_decision(rate, effect_size_gate=True)
+    assert gated['decision'] == 'NO-GO' and not gated['table'].iloc[0].failure_criterion
+    # A 10 % slower loose cell with the same failures: significant (p < 0.001) but < 30 %.
+    speeds = dict(SAME, **{'light-loose': BASE_SPEED * 0.9})
+    slow = pd.concat([session(STAGE1, speeds),
+                      session({'light-packed': 4, 'light-loose': 4},
+                              {c: speeds[c] for c in LIGHT}, name='phase0b')])
+    row = phase0_decision(slow)['table'].iloc[0]
+    assert row.speed_drop == pytest.approx(0.1) and row.mannwhitney_p < 0.001
+    assert row.speed_criterion and not row.failure_criterion
+    # speed is descriptive by default (SPEED_IN_DECISION = False)
+    assert not phase0_decision(slow)['go']
+    assert phase0_decision(slow, speed_in_decision=True)['go']
+    assert not phase0_decision(slow, effect_size_gate=True, speed_in_decision=True)['go']
+
+
+def test_effect_sizes_are_reported_with_intervals():
+    res = phase0_decision(session(STAGE1, SAME))
+    row = res['table'].set_index('cell').loc['light-loose']   # 8/20 vs 2/20
+    assert (row.rate_rise_ci_low, row.rate_rise_ci_high) == pytest.approx(
+        newcombe_interval(8, 20, 2, 20))
+    assert row.rate_rise_ci_low < row.rate_rise < row.rate_rise_ci_high
+    assert row.speed_drop == pytest.approx(0.0)
+    assert row.speed_drop_ci_low <= 0.0 <= row.speed_drop_ci_high
+    # Reproducible: the bootstrap seed is fixed.
+    again = phase0_decision(session(STAGE1, SAME))['table'].set_index('cell').loc['light-loose']
+    assert again.speed_drop_ci_low == row.speed_drop_ci_low
+
+
+def test_wilson_and_newcombe_match_published_values():
+    # Newcombe (1998), Stat. Med. 17: Wilson 81/263 and the hybrid interval of 56/70 - 48/80.
+    assert wilson_interval(81, 263) == pytest.approx((0.2553, 0.3662), abs=1e-4)
+    assert newcombe_interval(56, 70, 48, 80) == pytest.approx((0.0524, 0.3339), abs=1e-4)
+    assert wilson_interval(0, 20)[0] == 0.0 and wilson_interval(20, 20)[1] == 1.0
+
+
+def test_speed_drop_interval_covers_a_known_drop():
+    rng = np.random.default_rng(1)
+    y = rng.uniform(0.08, 0.12, 40)
+    low, high = speed_drop_interval(y * 0.6, y)
+    assert low < 0.4 < high and high - low < 0.2
+
+
+def test_two_factor_go_and_safety_outcomes_are_flagged():
+    speeds = dict(SAME, **{'heavy-loose': BASE_SPEED * 0.6})
+    df = session(dict.fromkeys(SAME, 3), speeds)
+    df['outcome'] = np.where(df.failure, 'TIMEOUT', 'SUCCESS')
+    df.loc[(df.cell == 'heavy-loose') & df.failure, 'outcome'] = 'SAFETY'
+    res = phase0_decision(df, speed_in_decision=True)
+    assert res['go'] and res['go_cells'] == ['heavy-loose'] and res['two_factor_only']
+    t = res['table'].set_index('cell')
+    assert t.loc['heavy-loose'].factors_changed == 2 and t.loc['light-loose'].factors_changed == 1
+    assert t.loc['heavy-loose'].safety_failures == 3 and t.loc['light-loose'].safety_failures == 0
+    assert t.loc['heavy-loose'].ref_safety_failures == 0
 
 
 def test_stage_override_and_bad_stage():
@@ -114,11 +181,14 @@ def test_stage_override_and_bad_stage():
 def test_go_on_speed_only_and_failure_only_mode():
     speeds = dict(SAME, **{'heavy-loose': BASE_SPEED * 0.6})
     df = session(dict.fromkeys(SAME, 3), speeds)
-    res = phase0_decision(df)
+    res = phase0_decision(df, speed_in_decision=True)
     t = res['table'].set_index('cell')
     assert res['go'] and t.loc['heavy-loose'].speed_criterion
     assert t.loc['heavy-loose'].speed_drop == pytest.approx(0.4)
-    assert not phase0_decision(df, use_speed=False)['go']
+    assert not phase0_decision(df, use_speed=False, speed_in_decision=True)['go']
+    default = phase0_decision(df)  # same data, speed descriptive: CONTINUE, speed still shown
+    assert default['decision'] == 'CONTINUE' and not default['speed_in_decision']
+    assert default['table'].set_index('cell').loc['heavy-loose'].speed_drop == pytest.approx(0.4)
 
 
 def test_rise_without_significance_is_not_go():
@@ -140,25 +210,43 @@ def test_invalid_trials_and_other_controllers_are_ignored():
     assert not phase0_decision(pd.concat([df, other]))['go']
 
 
-def test_main_study_holm_family():
+def test_main_study_primary_pooled_and_holm_secondary_family():
     frames = []
     for ctrl, f in {'B0': 10, 'B2': 8, 'student': 2, 'student_critic': 1}.items():
         frames.append(session({'light-loose': f, 'heavy-loose': f}, SAME, controller=ctrl,
                               n=25))
+    frames.append(session({'light-packed': 25}, SAME, controller='B0', n=25))  # not pooled
     table = main_study(pd.concat(frames))
-    assert len(table) == 8   # 2 cells x 4 comparisons
-    row = table[(table.cell == 'light-loose') & (table.a == 'student') & (table.b == 'B2')]
+    primary = table[table.role == 'primary']
+    secondary = table[table.role == 'secondary']
+    assert len(primary) == 1 and len(secondary) == 8   # 2 loose cells x 4 comparisons
+    p = primary.iloc[0]
+    assert (p.a, p.b, p.n_a, p.n_b) == ('student_critic', 'B0', 50, 50)
+    assert p.fisher_p == pytest.approx(hand_fisher_greater(20, 50, 2, 50))
+    assert p.holm_p == p.fisher_p and p.reject_h0               # unadjusted, alpha 0.05
+    assert p.rate_reduction == pytest.approx(0.36)
+    assert p.rate_reduction_ci_low < 0.36 < p.rate_reduction_ci_high
+    row = secondary[(secondary.cell == 'light-loose') & (secondary.a == 'student')
+                    & (secondary.b == 'B2')]
     raw = hand_fisher_greater(8, 25, 2, 25)  # B2 fails more than student
     assert row.fisher_p.iloc[0] == pytest.approx(raw)
-    np.testing.assert_allclose(table.holm_p, holm(table.fisher_p))
-    assert (table.holm_p >= table.fisher_p).all()
+    np.testing.assert_allclose(secondary.holm_p, holm(secondary.fisher_p))
+    assert (secondary.holm_p >= secondary.fisher_p).all()
     # student 2/25 vs B0 10/25: significant alone (p = 0.009), not after Holm over 8 tests
-    vs_b0 = table.set_index(['cell', 'a', 'b']).loc[('heavy-loose', 'student', 'B0')]
+    vs_b0 = secondary.set_index(['cell', 'a', 'b']).loc[('heavy-loose', 'student', 'B0')]
     assert vs_b0.fisher_p < 0.05 and not vs_b0.reject_h0
     frames[0] = session({'light-loose': 20, 'heavy-loose': 20}, SAME, controller='B0', n=25)
     strong = main_study(pd.concat(frames)).set_index(['cell', 'a', 'b'])
     assert strong.loc[('heavy-loose', 'student', 'B0')].reject_h0
     assert not strong.loc[('heavy-loose', 'student_critic', 'student')].reject_h0
+
+
+def test_main_study_primary_needs_both_controllers_in_loose_cells():
+    df = session({'light-loose': 5, 'light-packed': 1}, SAME, controller='student', n=25)
+    df = pd.concat([df, session({'light-packed': 3}, SAME, controller='B0', n=25)])
+    table = main_study(df)
+    assert 'primary' not in set(table.role)
+    assert list(table.cell) == ['light-packed']
 
 
 def test_calibration_metrics():

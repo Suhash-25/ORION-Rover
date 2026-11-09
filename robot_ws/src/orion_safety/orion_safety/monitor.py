@@ -88,6 +88,10 @@ class SafetyConfig:
     stuck_cmd_linear: float = 0.1           # m/s
     stuck_body_speed: float = 0.03          # m/s
     stuck_min_confidence: float = 0.3
+    # A body-speed fix (TerrainState.time_since_fix, aged by the message's own age) younger
+    # than this is trusted without the confidence term (council M7): a stuck rover spinning
+    # its wheels drives the wheel/body disagreement, and so the confidence, to 0.
+    stuck_fresh_fix_s: float = 0.5
     stuck_slip: float = 0.8
     stuck_s: float = 3.0
     hard_stuck_window_s: float = 20.0
@@ -224,7 +228,7 @@ class SafetyMonitor:
         # Inputs.
         self._joint = _Input()      # tuple of efforts
         self._imu = _Input()        # (roll, pitch) rad
-        self._terrain = _Input()    # (body_speed, confidence, (slip_left, slip_right))
+        self._terrain = _Input()    # (speed, confidence, (slip_left, slip_right), t_since_fix)
         self._ext_pose = _Input()   # (x, y, yaw) fence frame
         self._odom_pose = _Input()  # (x, y, yaw) odom frame
         self._cmd = _Input()        # (v, w) as sent to the drive controller
@@ -259,9 +263,15 @@ class SafetyMonitor:
         """Body roll and pitch in rad."""
         self._imu.update(now, (roll, pitch))
 
-    def on_terrain(self, now, body_speed, confidence, slip_side):
-        """Terrain estimate: body speed (m/s), its confidence [0, 1], (left, right) slip."""
-        self._terrain.update(now, (body_speed, confidence, tuple(slip_side)))
+    def on_terrain(self, now, body_speed, confidence, slip_side, time_since_fix=math.inf):
+        """
+        Terrain estimate: body speed (m/s), its confidence [0, 1], (left, right) slip.
+
+        time_since_fix: s since the last non-IMU body-speed fix (EXTERNAL or LIDAR_ODOM) when
+        the estimate was made; inf or NaN when there has been none.
+        """
+        self._terrain.update(now, (body_speed, confidence, tuple(slip_side),
+                                   float(time_since_fix)))
 
     def on_external_pose(self, now, x, y, yaw):
         """Ground-truth pose in the fence frame (m, rad)."""
@@ -416,11 +426,13 @@ class SafetyMonitor:
         if terrain is None:
             self._stuck_speed.since = self._stuck_slip.since = None
             return False
-        body_speed, confidence, slip_side = terrain
+        body_speed, confidence, slip_side, t_since_fix = terrain
         cmd_v = self._command(now)[0]
         driving = abs(cmd_v) > cfg.stuck_cmd_linear
-        no_motion = (driving and abs(body_speed) < cfg.stuck_body_speed
-                     and confidence > cfg.stuck_min_confidence)
+        fix_age = t_since_fix + (now - self._terrain.stamp)
+        fresh_fix = fix_age < cfg.stuck_fresh_fix_s      # False for inf and NaN
+        trusted = fresh_fix or confidence > cfg.stuck_min_confidence
+        no_motion = driving and abs(body_speed) < cfg.stuck_body_speed and trusted
         # Wheels spinning in the driven direction (slip is negative when reversing).
         if driving:
             spin = max(math.copysign(1.0, cmd_v) * s for s in slip_side)
@@ -429,8 +441,9 @@ class SafetyMonitor:
         by_speed = self._stuck_speed.update(now, no_motion)
         by_slip = self._stuck_slip.update(now, spin > cfg.stuck_slip)
         if by_speed:
+            basis = 'fresh fix' if fresh_fix else f'confidence {confidence:.2f}'
             v.flag(FLAG_STUCK, f'stuck: cmd {cmd_v:.2f} m/s but body {body_speed:.3f} m/s '
-                   f'for {cfg.stuck_s:g} s')
+                   f'({basis}) for {cfg.stuck_s:g} s')
         if by_slip:
             v.flag(FLAG_STUCK, f'stuck: side slip {spin:.2f} > {cfg.stuck_slip:g} '
                    f'for {cfg.stuck_s:g} s')

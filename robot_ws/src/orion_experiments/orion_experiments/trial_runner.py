@@ -19,6 +19,12 @@ leaves a record with outcome null.
 Per-trial conditions that StartTrial does not carry are parameters, read at each StartTrial:
 operator, ballast_kg, cone_depths_mm (the 3 drop-cone readings of this soil prep),
 firmware_hash (from orion_hardware's PONG; RoverHealth has no hash field), model_dir.
+
+Ground-truth gate (council M6): StartTrial is refused unless /orion/terrain_state has reported
+body_speed_source EXTERNAL (overhead camera) continuously for external_speed_hold_s (2 s),
+with no gap longer than terrain_max_gap_s. A camera whose clock is offset from the terrain
+node's goes stale silently; this makes it loud. require_external_speed:=false is only for
+sessions that are run without ground truth (failure rate only, SPEC section 9).
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ from geometry_msgs.msg import PoseStamped
 from orion_learning import obs_spec
 from orion_msgs.msg import PolicyStatus
 from orion_msgs.msg import SafetyStatus
+from orion_msgs.msg import TerrainState
 from orion_msgs.srv import SetMode
 from orion_msgs.srv import StartTrial
 from orion_msgs.srv import StopTrial
@@ -43,6 +50,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from rclpy.qos import qos_profile_sensor_data
 
 from .metadata import find_repo_root
 from .metadata import git_state
@@ -58,6 +66,10 @@ from .recorder import SPEC_TOPICS
 
 TRIAL_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
 MODE_FOR_CONTROLLER = {'B0': PolicyStatus.MODE_BASELINE}
+SPEED_SOURCE_NAMES = {TerrainState.SPEED_SOURCE_NONE: 'NONE',
+                      TerrainState.SPEED_SOURCE_IMU_ONLY: 'IMU_ONLY',
+                      TerrainState.SPEED_SOURCE_LIDAR_ODOM: 'LIDAR_ODOM',
+                      TerrainState.SPEED_SOURCE_EXTERNAL: 'EXTERNAL'}
 
 
 def yaw_of(q) -> float:
@@ -82,6 +94,9 @@ class TrialRunner(Node):
         p('drive_policy', True)
         p('record_warmup_s', 2.0)
         p('set_mode_timeout_s', 3.0)
+        p('require_external_speed', True)
+        p('external_speed_hold_s', 2.0)
+        p('terrain_max_gap_s', 0.25)       # TerrainState is 20 Hz: 5 missed messages
         self._recorder_factory = recorder_factory
         self._lock = threading.RLock()
         self._trial: Optional[dict] = None
@@ -89,6 +104,9 @@ class TrialRunner(Node):
         self._timer = None
         self._start_pose = None
         self._status: Optional[PolicyStatus] = None
+        # (receipt time of the last TerrainState, its speed source, start of the current
+        # continuous EXTERNAL run or None), node clock in s; replaced as one tuple.
+        self._terrain = (None, None, None)
         # Services and subscriptions each run one callback at a time; the SetMode client has
         # its own group so its response is handled while a service callback waits for it
         # (needs a MultiThreadedExecutor, see main()).
@@ -105,6 +123,8 @@ class TrialRunner(Node):
                                  callback_group=subs)
         self.create_subscription(PoseStamped, '/orion/ground_truth_pose', self._on_pose, 10,
                                  callback_group=subs)
+        self.create_subscription(TerrainState, '/orion/terrain_state', self._on_terrain,
+                                 qos_profile_sensor_data, callback_group=subs)
 
     def param(self, name):
         return self.get_parameter(name).value
@@ -130,7 +150,44 @@ class TrialRunner(Node):
             return f'cell {req.cell} needs ballast_kg = 0 (parameter is {ballast})'
         if req.controller != 'B0' and not self.param('model_dir'):
             return f'controller {req.controller} needs the model_dir parameter (ONNX sha256)'
-        return None
+        return self._speed_source_problem()
+
+    def _on_terrain(self, msg: TerrainState):
+        now = self._ros_now()
+        last, _, since = self._terrain
+        if msg.body_speed_source != TerrainState.SPEED_SOURCE_EXTERNAL:
+            since = None
+        elif since is None or now - last > self.param('terrain_max_gap_s'):
+            since = now
+        self._terrain = (now, int(msg.body_speed_source), since)
+
+    def external_speed_for_s(self) -> float:
+        """Seconds the body-speed source has been EXTERNAL without a gap (0 if not now)."""
+        last, _, since = self._terrain
+        now = self._ros_now()
+        if since is None or now - last > self.param('terrain_max_gap_s'):
+            return 0.0
+        return now - since
+
+    def _speed_source_problem(self) -> Optional[str]:
+        if not self.param('require_external_speed'):
+            return None
+        hold = self.param('external_speed_hold_s')
+        last, source, _ = self._terrain
+        held = self.external_speed_for_s()
+        if held >= hold:
+            return None
+        if last is None:
+            why = 'no /orion/terrain_state received'
+        elif self._ros_now() - last > self.param('terrain_max_gap_s'):
+            why = f'/orion/terrain_state is {self._ros_now() - last:.2f} s old'
+        elif source != TerrainState.SPEED_SOURCE_EXTERNAL:
+            why = f'body_speed_source is {SPEED_SOURCE_NAMES.get(source, source)}'
+        else:
+            why = f'body_speed_source EXTERNAL for only {held:.2f} s'
+        return (f'refused: {why}; a trial needs EXTERNAL (overhead camera) continuously for '
+                f'{hold:g} s (council M6). Check orion_ground_truth and the camera clock, or '
+                f'set require_external_speed:=false for a session without ground truth')
 
     def _on_start(self, req, res):
         with self._lock:
@@ -166,6 +223,8 @@ class TrialRunner(Node):
                 'firmware_hash': self.param('firmware_hash') or None,
                 'onnx': onnx, 'obs_spec_hash': obs_spec.OBS_SPEC_HASH,
                 'policy_status': None, 'modes_seen': [],
+                'require_external_speed': bool(self.param('require_external_speed')),
+                'external_speed_for_s': self.external_speed_for_s(),
                 'goal_distance_m': float(self.param('goal_distance_m')),
                 'start_pose': None, 'final_progress_m': None,
                 'bag_path': os.path.abspath(bag_path), 'bag_exit_code': None,

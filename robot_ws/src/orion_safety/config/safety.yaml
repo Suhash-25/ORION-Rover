@@ -4,6 +4,7 @@
 orion_safety:
   ros__parameters:
     rate_hz: 50.0
+    clock_warn_after_s: 5.0        # warn while the node clock is still 0 (no /clock) this long
     wheel_joints: [front_left_wheel_joint, front_right_wheel_joint,
                    rear_left_wheel_joint, rear_right_wheel_joint]
 
@@ -57,6 +58,7 @@ orion_safety:
     stuck_cmd_linear: 0.1          # m/s
     stuck_body_speed: 0.03         # m/s
     stuck_min_confidence: 0.3
+    stuck_fresh_fix_s: 0.5         # body-speed fix younger than this: confidence not needed
     stuck_slip: 0.8
     stuck_s: 3.0
     hard_stuck_window_s: 20.0
