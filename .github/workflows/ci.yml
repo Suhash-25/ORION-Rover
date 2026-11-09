@@ -31,6 +31,9 @@ jobs:
           rosdep update --rosdistro jazzy
           rosdep install --from-paths robot_ws/src --ignore-src -y --rosdistro jazzy
 
+      - name: Install pip-only Python deps (onnxruntime, torch CPU, rosbags, orion_learning)
+        run: scripts/ci_pip_deps.sh
+
       - name: colcon build
         working-directory: robot_ws
         run: |

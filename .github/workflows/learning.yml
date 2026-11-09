@@ -1,0 +1,45 @@
+# orion_learning (no ROS): unit tests + a ~25 s smoke training run that must export a valid
+# ONNX artefact. Same command as `scripts/verify.sh learning`.
+name: learning
+
+on:
+  push:
+    branches: [main]
+    paths: ['learning/**', 'scripts/verify.sh', '.github/workflows/learning.yml']
+  pull_request:
+    paths: ['learning/**', 'scripts/verify.sh', '.github/workflows/learning.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: learning-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-smoke-train:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: learning/pyproject.toml
+
+      - name: Install orion_learning with CPU torch
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install -e "learning[train,bags,test]"
+
+      - name: pytest + smoke training
+        run: scripts/verify.sh learning
+
+      - name: Upload smoke run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: learning-smoke-run
+          path: learning/runs
+          if-no-files-found: ignore
