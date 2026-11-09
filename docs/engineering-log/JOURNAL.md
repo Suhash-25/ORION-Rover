@@ -81,3 +81,11 @@ official ROS apt servers are blocked there. CI on GitHub uses the official apt p
 - WP5 orion_policy (runtime, B0, gating, modes) + orion_experiments (runner, stats)
 - Each agent logs to docs/engineering-log/agents/WPn.md. Next: council review of each branch,
   integration, full verification.
+
+### 11:28 User approved the overhead camera (D-007)
+- Added orion_ground_truth: AprilTag TF -> /orion/ground_truth_pose (PoseStamped, frame
+  `sandbox`). 5 geometry tests pass, including pose recovery for two different camera
+  placements; negative check: dropping the reference-tag inversion makes that test fail.
+- Mistake caught (M-008): ament_python tests did not run at all ("NO TESTS RAN") because this
+  setuptools ignores `tests_require`. Fixed with `extras_require={'test': ['pytest']}` and told
+  the three agents writing Python packages.

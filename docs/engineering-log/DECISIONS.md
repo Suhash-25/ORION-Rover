@@ -29,3 +29,11 @@ User asked to use the harness. Kept `feature_list.json` / `LESSONS.md` / progres
 ## D-006 Lint: ament defaults minus Q000 (2026-11-09)
 Existing launch files use double quotes. Ignoring the quote-style rule (Q000) avoids rewriting
 every file for style; all other ament flake8 rules (imports, unused vars, tabs) are enforced.
+
+## D-007 Sandbox ground truth from an overhead camera + AprilTags (2026-11-09, user approved)
+Council finding F4: wheel odometry is the numerator of slip, not truth. Options: (a) overhead
+camera + AprilTag (~5 mm, >= 20 Hz), (b) lidar odometry only (2-5 cm/s), (c) motion capture
+(not available). User chose (a) at 11:28. Package orion_ground_truth: a reference tag fixed in
+the sandbox plus a tag on the rover, both in the same image, so camera placement errors
+cancel. Implausible detections (> 1 m/s jumps, > 0.6 rad tilt) are rejected. Lidar odometry
+stays as the onboard fallback.

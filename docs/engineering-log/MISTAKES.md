@@ -48,3 +48,11 @@ Format: what happened → root cause → lesson → guard now in place.
 ## M-007 Sandbox-only: xmllint needs the internet
 - **What:** `ament_xmllint` fails in the sandbox because it downloads the package.xml schema.
 - **Lesson:** not a code bug; it passes in CI. Recorded so nobody "fixes" it by disabling xmllint.
+
+## M-008 Python package tests silently not running
+- **What:** colcon reported "NO TESTS RAN" for orion_ground_truth.
+- **Root cause:** current setuptools ignores `tests_require`, so colcon used unittest, which
+  finds no pytest-style tests.
+- **Lesson:** a green run with zero tests is not a pass; always read the test count.
+- **Guard:** `extras_require={'test': ['pytest']}` in every ament_python setup.py; CI prints
+  `colcon test-result --verbose` with counts.
