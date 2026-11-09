@@ -74,6 +74,10 @@ STAGE_ALPHA = {1: 0.01, 2: 0.04}
 # Council M3 switch (SPEC section 9): False = GO on the one-sided tests alone, effect sizes
 # reported with CIs; True = the tests must also show a rise >= 0.25 / a drop >= 30 %.
 EFFECT_SIZE_GATE = False
+# Speed enters the GO decision only when True. Default False (council M3 follow-up): counting
+# both metrics in both loose cells is 4 tests at stage 1 and raises the simulated false-GO
+# rate to about 6 %, above the pre-registered 5 %. Speed is still reported with its CI.
+SPEED_IN_DECISION = False
 MIN_RATE_RISE = 0.25
 MIN_SPEED_DROP = 0.30
 # Cells that differ from REFERENCE_CELL in more than the soil (heavy-loose adds ballast too).
@@ -183,7 +187,8 @@ def phase0_decision(trials: pd.DataFrame, stage: Optional[int] = None,
                     effect_size_gate: bool = EFFECT_SIZE_GATE,
                     min_rate_rise: float = MIN_RATE_RISE, min_speed_drop: float = MIN_SPEED_DROP,
                     use_speed: bool = True, alpha: Optional[float] = None,
-                    ci_level: float = 0.95) -> dict:
+                    ci_level: float = 0.95,
+                    speed_in_decision: bool = SPEED_IN_DECISION) -> dict:
     """Two-stage GO / CONTINUE / NO-GO from valid B0 trials (see the module docstring)."""
     # Columns: trial_id, cell, controller, valid, failure, effective_speed (outcome optional).
     # stage defaults to phase0_stage(trials); alpha defaults to the pre-registered
@@ -231,12 +236,18 @@ def phase0_decision(trials: pd.DataFrame, stage: Optional[int] = None,
     table = pd.DataFrame(rows)
     if stage == 2 and table.empty:
         raise ValueError(f'stage 2 needs valid B0 trials in {STAGE2_CELL}')
-    go_cells = ([] if table.empty else
-                list(table.cell[table.failure_criterion | table.speed_criterion]))
+    if table.empty:
+        go_cells = []
+    else:
+        decisive = table.failure_criterion
+        if speed_in_decision:
+            decisive = decisive | table.speed_criterion
+        go_cells = list(table.cell[decisive])
     go = bool(go_cells)
     decision = 'GO' if go else ('CONTINUE' if stage == 1 else 'NO-GO')
     return {'go': go, 'decision': decision, 'stage': stage, 'alpha': alpha, 'table': table,
             'ref_n': len(ref), 'use_speed': use_speed, 'effect_size_gate': effect_size_gate,
+            'speed_in_decision': bool(use_speed and speed_in_decision),
             'go_cells': go_cells,
             'two_factor_only': go and all(c in TWO_FACTOR_CELLS for c in go_cells)}
 
@@ -559,12 +570,14 @@ def _phase0_lines(ph: dict) -> list[str]:
     rise = (f'a failure-rate rise >= {MIN_RATE_RISE:g} with ' if gate
             else 'a higher failure rate, ')
     crit = f'{rise}one-sided Fisher p < {alpha}'
-    if ph['use_speed']:
+    if ph['speed_in_decision']:
         drop = (f'a median effective-speed drop >= {MIN_SPEED_DROP:.0%} with ' if gate
                 else 'a lower effective speed, ')
         crit += f', or {drop}one-sided Mann-Whitney p < {alpha}'
     rule = ('effect-size gate ON (EFFECT_SIZE_GATE / --effect-size-gate)' if gate else
             'effect-size gate OFF: effect sizes and their 95 % CIs are descriptive')
+    if ph['use_speed'] and not ph['speed_in_decision']:
+        rule += '; effective speed reported, not part of the decision (SPEED_IN_DECISION)'
     scope = ('at least one loose cell' if ph['stage'] == 1
              else f'{STAGE2_CELL}, stages 1 and 2 pooled')
     nxt = {'GO': '', 'NO-GO': ' Pivot to self-rescue (SPEC section 8).',
@@ -585,7 +598,8 @@ def _phase0_lines(ph: dict) -> list[str]:
 
 
 def write_report(trials: pd.DataFrame, samples: dict, out_dir: str,
-                 use_speed: bool = True, effect_size_gate: bool = EFFECT_SIZE_GATE) -> dict:
+                 use_speed: bool = True, effect_size_gate: bool = EFFECT_SIZE_GATE,
+                 speed_in_decision: bool = SPEED_IN_DECISION) -> dict:
     """Write trials.csv, tests.csv, calibration.csv and report.md; return the results."""
     os.makedirs(out_dir, exist_ok=True)
     trials.to_csv(os.path.join(out_dir, 'trials.csv'), index=False)
@@ -597,7 +611,8 @@ def write_report(trials: pd.DataFrame, samples: dict, out_dir: str,
     tests = []
     b0 = trials[trials.controller == 'B0']
     if (b0.cell == REFERENCE_CELL).any() and b0.cell.isin(LOOSE_CELLS).any():
-        ph = phase0_decision(trials, use_speed=use_speed, effect_size_gate=effect_size_gate)
+        ph = phase0_decision(trials, use_speed=use_speed, effect_size_gate=effect_size_gate,
+                             speed_in_decision=speed_in_decision)
         results['phase0'] = ph
         lines += _phase0_lines(ph)
         tests += [dict(test='phase0', **r) for r in ph['table'].to_dict('records')]
@@ -640,6 +655,8 @@ def main(argv=None) -> int:
     parser.add_argument('--effect-size-gate', action='store_true', default=EFFECT_SIZE_GATE,
                         help='Phase-0 GO also needs a rise >= 0.25 / drop >= 30 %% (council '
                              'M3; SPEC section 9 open decision)')
+    parser.add_argument('--speed-in-decision', action='store_true', default=SPEED_IN_DECISION,
+                        help='also GO on the speed test (raises false GO above 5 %%; council M3)')
     args = parser.parse_args(argv)
     protocol = None
     if args.protocol:
@@ -650,7 +667,8 @@ def main(argv=None) -> int:
         print(f'no finished trials under {args.trials_root}', file=sys.stderr)
         return 1
     results = write_report(trials, samples, args.out, use_speed=not args.no_speed,
-                           effect_size_gate=args.effect_size_gate)
+                           effect_size_gate=args.effect_size_gate,
+                           speed_in_decision=args.speed_in_decision)
     if 'phase0' in results:
         ph = results['phase0']
         print(f'Phase-0 stage {ph["stage"]}: {ph["decision"]}')

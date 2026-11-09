@@ -125,7 +125,10 @@ def test_effect_size_gate_is_off_by_default_and_switchable():
     row = phase0_decision(slow)['table'].iloc[0]
     assert row.speed_drop == pytest.approx(0.1) and row.mannwhitney_p < 0.001
     assert row.speed_criterion and not row.failure_criterion
-    assert phase0_decision(slow)['go'] and not phase0_decision(slow, effect_size_gate=True)['go']
+    # speed is descriptive by default (SPEED_IN_DECISION = False)
+    assert not phase0_decision(slow)['go']
+    assert phase0_decision(slow, speed_in_decision=True)['go']
+    assert not phase0_decision(slow, effect_size_gate=True, speed_in_decision=True)['go']
 
 
 def test_effect_sizes_are_reported_with_intervals():
@@ -160,7 +163,7 @@ def test_two_factor_go_and_safety_outcomes_are_flagged():
     df = session(dict.fromkeys(SAME, 3), speeds)
     df['outcome'] = np.where(df.failure, 'TIMEOUT', 'SUCCESS')
     df.loc[(df.cell == 'heavy-loose') & df.failure, 'outcome'] = 'SAFETY'
-    res = phase0_decision(df)
+    res = phase0_decision(df, speed_in_decision=True)
     assert res['go'] and res['go_cells'] == ['heavy-loose'] and res['two_factor_only']
     t = res['table'].set_index('cell')
     assert t.loc['heavy-loose'].factors_changed == 2 and t.loc['light-loose'].factors_changed == 1
@@ -178,11 +181,14 @@ def test_stage_override_and_bad_stage():
 def test_go_on_speed_only_and_failure_only_mode():
     speeds = dict(SAME, **{'heavy-loose': BASE_SPEED * 0.6})
     df = session(dict.fromkeys(SAME, 3), speeds)
-    res = phase0_decision(df)
+    res = phase0_decision(df, speed_in_decision=True)
     t = res['table'].set_index('cell')
     assert res['go'] and t.loc['heavy-loose'].speed_criterion
     assert t.loc['heavy-loose'].speed_drop == pytest.approx(0.4)
-    assert not phase0_decision(df, use_speed=False)['go']
+    assert not phase0_decision(df, use_speed=False, speed_in_decision=True)['go']
+    default = phase0_decision(df)  # same data, speed descriptive: CONTINUE, speed still shown
+    assert default['decision'] == 'CONTINUE' and not default['speed_in_decision']
+    assert default['table'].set_index('cell').loc['heavy-loose'].speed_drop == pytest.approx(0.4)
 
 
 def test_rise_without_significance_is_not_go():

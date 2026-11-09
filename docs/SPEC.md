@@ -180,8 +180,8 @@ D = light-loose, B = heavy-loose; stage-1 early-GO probability in brackets:
 
 | rule | power, C 10 % / D 40 % / B 40 % | power, B 10 % | false GO, all cells 10 % | all 30 % |
 | --- | --- | --- | --- | --- |
-| ungated, failures + speed (**implemented default**) | 0.93 (stage 1: 0.58) | 0.91 | **0.062** | **0.063** |
-| ungated, failures only (`--no-speed`) | 0.91 (0.51) | 0.89 | 0.017 | 0.029 |
+| ungated, failures only (**implemented default**; speed reported, not decisive) | 0.91 (stage 1: 0.51) | 0.89 | 0.017 | 0.029 |
+| ungated, failures + speed (`--speed-in-decision`) | 0.93 (0.58) | 0.91 | **0.062** | **0.063** |
 | ungated, every test at alpha / 2 | 0.87 (0.45) | 0.85 | 0.031 | 0.033 |
 | gated, failures + speed (`--effect-size-gate`) | 0.81 (0.55) | 0.75 | 0.002 | 0.027 |
 | gated, failures only | 0.80 (0.51) | 0.75 | 0.001 | 0.017 |
@@ -189,7 +189,8 @@ D = light-loose, B = heavy-loose; stage-1 early-GO probability in brackets:
 The 0.01 / 0.04 split bounds the false-GO rate at 0.05 only for one test per look. The rule
 runs four tests at stage 1 (2 loose cells x 2 metrics) and two at stage 2, so the ungated rule
 with the speed test exceeds 0.05 (0.062-0.063). The failure-only or alpha / 2 variants keep it
-below 0.05; see section 9. Reference (not the implemented rule): a plain two-sided Fisher test
+below 0.05, which is why the default decides on the failure rate alone (`SPEED_IN_DECISION =
+False`); effective speed is still reported with its CI. See section 9. Reference (not the implemented rule): a plain two-sided Fisher test
 at 0.05 on 10 % vs 40 % has exact power 0.49 at 20 per cell, 0.71 at 30, 0.85 at 40.
 
 Main study: 4 cells x 4 controllers (B0, B2, student, student + critic) x 25 = 400 trials.
@@ -202,12 +203,12 @@ unadjusted; 40 % vs 10 %: 0.29 and 0.73. The pooled primary at 50 vs 50 has 0.64
 
 ## 9. Open decisions for the user
 
-- **Phase-0 effect-size gate (council M3).** Implemented default: GO on the one-sided tests at
-  0.01 / 0.04 alone, effect sizes reported with CIs (`EFFECT_SIZE_GATE = False`). Options, with
-  the simulated numbers of section 8 (power at 10 % vs 40 %, false GO under H0):
-  (a) the default, failures + speed: power 0.91-0.93, false GO 0.062-0.063, above the 0.05 the
-  design promised; (b) ungated, failure rate only (`--no-speed`; median speeds stay in the
-  per-cell summary): power
+- **Phase-0 decision rule (council M3), awaiting the user's choice.** Implemented default (b):
+  GO on the one-sided failure-rate test at 0.01 / 0.04 alone, effect sizes and speed reported
+  with CIs (`EFFECT_SIZE_GATE = False`, `SPEED_IN_DECISION = False`). Options, with the
+  simulated numbers of section 8 (power at 10 % vs 40 %, false GO under H0):
+  (a) failures + speed (`--speed-in-decision`): power 0.91-0.93, false GO 0.062-0.063, above
+  the 0.05 the design promised; (b) ungated, failure rate only (the default): power
   0.89-0.91, false GO 0.017-0.029; (c) ungated, every test at alpha / 2: power 0.85-0.87, false
   GO 0.031-0.033; (d) the gated D-008 rule (`--effect-size-gate`): power 0.75-0.81, false GO
   0.002-0.027. The implementer's recommendation is (b): almost the same power as (a), and the

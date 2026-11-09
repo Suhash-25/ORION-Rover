@@ -29,10 +29,11 @@ def test_vectorised_rule_equals_phase0_decision_session_by_session():
         for i in range(40):
             stage1, everything = session_frames(sessions, i)
             ref1 = phase0_decision(stage1, effect_size_gate=gate, use_speed=use_speed,
-                                   alpha=alphas[0])
+                                   alpha=alphas[0], speed_in_decision=use_speed)
             assert ref1['stage'] == 1 and early[i] == ref1['go'], (label, i)
             ref = ref1['go'] or phase0_decision(everything, effect_size_gate=gate,
-                                                use_speed=use_speed, alpha=alphas[1])['go']
+                                                use_speed=use_speed, alpha=alphas[1],
+                                                speed_in_decision=use_speed)['go']
             assert final[i] == ref, (label, i)
             seen.add((bool(early[i]), bool(final[i])))
     assert seen == {(False, False), (False, True), (True, True)}   # every path exercised
@@ -49,10 +50,12 @@ def test_plain_fisher_reference_matches_the_paper():
 def test_quoted_numbers_reproduce_with_the_fixed_seed():
     # SPEC section 8 and RESEARCH.md Sample Size quote these (20000 sessions, default seed).
     h1 = simulate_phase0(dict(SCENARIOS[0][1]))
-    assert h1[RULES[0][0]] == pytest.approx((0.577, 0.931), abs=5e-4)
+    assert h1[RULES[0][0]] == pytest.approx((0.510, 0.910), abs=5e-4)   # default rule
+    assert h1[RULES[1][0]] == pytest.approx((0.577, 0.931), abs=5e-4)
     assert h1[RULES[3][0]] == pytest.approx((0.548, 0.814), abs=5e-4)
     h0 = simulate_phase0(dict(SCENARIOS[3][1]))
-    assert h0[RULES[0][0]][1] == pytest.approx(0.063, abs=5e-4)
+    assert h0[RULES[0][0]][1] == pytest.approx(0.029, abs=5e-4)
+    assert h0[RULES[1][0]][1] == pytest.approx(0.063, abs=5e-4)
 
 
 def test_cli_runs_within_the_time_budget(capsys):

@@ -148,8 +148,8 @@ def session_frames(sessions: dict, i: int, n1: int = 20) -> tuple[pd.DataFrame, 
 
 # (label, effect_size_gate, use_speed, alpha factor per test). The first is the default rule.
 RULES = (
-    ('ungated, failures + speed (default)', False, True, 1.0),
-    ('ungated, failures only (--no-speed)', False, False, 1.0),
+    ('ungated, failures only (default; speed reported, not decisive)', False, False, 1.0),
+    ('ungated, failures + speed (--speed-in-decision)', False, True, 1.0),
     ('ungated, failures + speed, each test at alpha / 2', False, True, 0.5),
     ('gated, failures + speed (--effect-size-gate)', True, True, 1.0),
     ('gated, failures only', True, False, 1.0),
