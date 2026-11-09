@@ -23,7 +23,7 @@ source_ros() {
   set -u
 }
 
-build() { source_ros; (cd "$WS" && colcon build --symlink-install --event-handlers console_cohesion+); }
+build() { source_ros; (cd "$WS" && colcon build --event-handlers console_cohesion+); }
 
 unit() {
   build
