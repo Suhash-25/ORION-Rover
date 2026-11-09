@@ -3,37 +3,25 @@ Scripted motions: the escape library E, the critic probe, and the retreat along 
 
 Each motion is a Plan: a fixed list of (v m/s, w rad/s) targets, one per control tick. Plans
 are counted in ticks, not wall time, so they are deterministic under sim time and in tests.
+
+The escape library is orion_learning.escape_library.E itself (council B3): the manoeuvres the
+critic's rho is labelled under and that B0 runs in simulation are the ones the rover runs, and
+an escape plays exactly escape_library.manoeuvre_ticks, as the simulator does.
 """
 
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
 from typing import Optional, Sequence
 
+from orion_learning.escape_library import E, Manoeuvre, manoeuvre_ticks
 
-@dataclass(frozen=True)
-class Segment:
-    duration_s: float
-    v: float      # m/s
-    w: float      # rad/s
-    label: str
-
-
-# The escape library E. SPEC section 1 defines the entrapment risk rho "under the escape
-# library E", so the learning env's E must be this same list (integrator: keep them equal).
-ESCAPE_LIBRARY: tuple[Segment, ...] = (
-    Segment(1.0, 0.0, 0.0, 'settle: stop so the wheels stop digging'),
-    Segment(2.0, -0.15, 0.0, 'reverse out along the ruts'),
-    Segment(0.5, 0.0, 0.6, 'wiggle left: break the rut walls'),
-    Segment(0.5, 0.0, -0.6, 'wiggle right'),
-    Segment(0.5, 0.0, 0.6, 'wiggle left'),
-    Segment(0.5, 0.0, -0.6, 'wiggle right'),
-    Segment(2.0, 0.12, 0.0, 'creep forward on fresh ground'),
-)
+# The escape library E (SPEC section 1: rho is defined "under the escape library E").
+ESCAPE_LIBRARY = E
 
 PROBE_SPEED = 0.1        # m/s, SPEC section 6: probe = 0.1 m/s straight for 1 s
 PROBE_DURATION_S = 1.0
+PROBE = Manoeuvre('probe', ((PROBE_DURATION_S, PROBE_SPEED, 0.0),))
 
 
 class Plan:
@@ -61,19 +49,14 @@ class Plan:
         return len(self._targets)
 
 
-def segments_plan(segments: Sequence[Segment], dt: float, label: str) -> Plan:
-    targets: list[tuple[float, float]] = []
-    for seg in segments:
-        targets += [(seg.v, seg.w)] * max(1, round(seg.duration_s / dt))
-    return Plan(targets, label)
-
-
-def escape_plan(dt: float) -> Plan:
-    return segments_plan(ESCAPE_LIBRARY, dt, 'escape')
+def escape_plan(dt: float, index: int = 0) -> Plan:
+    """Plan of manoeuvre E[index % len(E)] at control period dt (s)."""
+    manoeuvre = ESCAPE_LIBRARY[index % len(ESCAPE_LIBRARY)]
+    return Plan(manoeuvre_ticks(manoeuvre, dt), f'escape {manoeuvre.name}')
 
 
 def probe_plan(dt: float) -> Plan:
-    return segments_plan([Segment(PROBE_DURATION_S, PROBE_SPEED, 0.0, 'probe')], dt, 'probe')
+    return Plan(manoeuvre_ticks(PROBE, dt), 'probe')
 
 
 class EntryPath:

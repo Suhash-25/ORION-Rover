@@ -13,10 +13,15 @@ Modes (PolicyStatus.MODE_*):
             the band, at most once per probe_cooldown_s); 0.5-0.7 retreat along the entry
             path (escape if no path was recorded); > 0.7 ESCAPE.
   PROBE     0.1 m/s straight for 1 s on /cmd_vel/escape, then back to POLICY.
-  ESCAPE    the escape library on /cmd_vel/escape, then back to the mode it interrupted.
-            Armed by SafetyStatus FLAG_STUCK, by rho > 0.7 or by SetMode. After
+  ESCAPE    the next manoeuvre of the escape library E (orion_learning.escape_library,
+            cyclic from E[0] after each SetMode) on /cmd_vel/escape, then back to the mode it
+            interrupted. Armed by SafetyStatus FLAG_STUCK, by rho > 0.7 or by SetMode. After
             max_escape_attempts escapes without a clean driving tick in between the core
             gives up and goes to IDLE (orion_safety's hard-stuck rule then ends the trial).
+
+The adapter's history (orion_learning.history, the training code) gets [obs, previous
+executed command] pushed every tick that builds an observation, BEFORE inference, and is
+cleared when a driving mode is selected, as at the start of a training episode.
 
 Every published command is rate-limited (obs_spec.rate_limit) and scaled to the latest
 SafetyStatus limits. With no SafetyStatus newer than safety_timeout_s, in HALT/ESTOP, or with
@@ -31,13 +36,13 @@ from typing import Optional
 
 import numpy as np
 from orion_learning import obs_spec
+from orion_learning.escape_library import MAX_ESCAPE_ATTEMPTS
+from orion_learning.history import History
 
 from .controllers import ControlInput
 from .controllers import Controller
-from .observation import History
 from .observation import InputNotReady
 from .observation import ObservationBuilder
-from .observation import twist_to_action
 from .sequences import EntryPath
 from .sequences import escape_plan
 from .sequences import Plan
@@ -66,7 +71,7 @@ class CoreConfig:
     caution_max_speed: float = 0.2          # m/s in the 0.3-0.5 band, also the retreat cap
     probe_cooldown_s: float = 5.0
     retreat_path_s: float = 2.0             # s of entry path kept for a retreat
-    max_escape_attempts: int = 3
+    max_escape_attempts: int = MAX_ESCAPE_ATTEMPTS
 
 
 @dataclass
@@ -109,9 +114,10 @@ class PolicyCore:
         self.mode = MODE_IDLE
         self.base_mode = MODE_IDLE          # the driving mode PROBE/ESCAPE return to
         self.shaper = CommandShaper(config.dt)
-        self.history = History()
+        self.history = History(1)
         self.entry_path = EntryPath(config.dt, config.retreat_path_s)
         self.escape_attempts = 0
+        self._escape_index = 0               # next manoeuvre of E
         self._plan: Optional[Plan] = None    # PROBE / ESCAPE plan
         self._retreat: Optional[Plan] = None
         self._last_band = Band.EXPLORE
@@ -137,6 +143,8 @@ class PolicyCore:
             self._plan = None
             self.base_mode = mode
             self.escape_attempts = 0
+            self._escape_index = 0
+            self.history.reset()
             self.entry_path.clear()
             self._last_band = Band.EXPLORE
             if mode == MODE_BASELINE:
@@ -156,7 +164,11 @@ class PolicyCore:
         if self._active_channel is not None and self._active_channel != new_channel:
             # twist_mux would hold the old channel's last command until its 0.5 s timeout.
             self._pending_zero.append(self._active_channel)
-            self.shaper.hold()
+            if new_channel is None:
+                self.shaper.hold()      # IDLE: stop now
+            # policy <-> escape keeps the rate-limit origin: the rover is still moving at the
+            # last command, and in training (B0Controller, CriticGate) an escape is
+            # rate-limited from it in the same way.
         self._active_channel = new_channel
         self.mode = mode
 
@@ -180,11 +192,14 @@ class PolicyCore:
             self._set_mode(MODE_IDLE)
             return False
         self.escape_attempts += 1
-        self._plan = escape_plan(self.cfg.dt)
+        self._plan = escape_plan(self.cfg.dt, self._escape_index)
+        self._escape_index += 1
         self._set_mode(MODE_ESCAPE)
         return True
 
     def _finish_plan(self) -> None:
+        if self.mode == MODE_ESCAPE and self.base_mode == MODE_BASELINE:
+            self.baseline.after_escape()
         self._plan = None
         self._set_mode(self.base_mode)
 
@@ -218,7 +233,6 @@ class PolicyCore:
                               'holding zero')
         try:
             obs = builder.build(now, self.shaper.last)
-            terrain = builder.terrain(now)
         except InputNotReady as e:
             return self._hold(result, f'{e}: holding zero')
 
@@ -228,8 +242,7 @@ class PolicyCore:
             if not self._start_escape():
                 return self._give_up(result)
 
-        inp = ControlInput(obs=obs, history=self.history.array(),
-                           slip_side=terrain['slip_side'], dt=self.cfg.dt)
+        inp = ControlInput(obs=obs, history=self.history.push(obs)[0], dt=self.cfg.dt)
         learnt = self.policy if self.base_mode == MODE_POLICY else None
         out = learnt.step(inp) if learnt is not None else None
         if out is not None:
@@ -244,7 +257,6 @@ class PolicyCore:
         self._pending_zero = []
         result.publish.append((self._active_channel, v, w))
         result.mode = self.mode
-        self.history.push(obs, twist_to_action(v, w))
         if from_policy:
             self.entry_path.record(v, w)
         if self._plan is not None and self._plan.done:

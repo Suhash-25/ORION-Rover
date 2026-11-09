@@ -92,14 +92,15 @@ def test_baseline_drives_on_policy_channel_with_rate_limit():
     assert np.isnan(res[-1].risk) and not res[-1].latent.any()
 
 
-def test_history_holds_obs_and_executed_action():
+def test_history_holds_obs_and_previous_executed_action():
     rig = Rig()
     rig.core.request_mode(MODE_BASELINE)
     rig.run(3)
-    h = rig.core.history.array()
-    assert h[-1, -2] == pytest.approx(3 * obs_spec.MAX_LINEAR_ACCEL * DT / 0.5)
-    # prev_cmd inside the newest obs is the command executed one tick earlier
-    assert h[-1, 0] == pytest.approx(2 * obs_spec.MAX_LINEAR_ACCEL * DT / 0.5)
+    h = rig.core.history.buffer[0]
+    # Row of tick 3: its obs carries prev_cmd = the command executed on tick 2, and so does the
+    # action column (orion_learning.history convention).
+    assert h[-1, -2] == pytest.approx(2 * obs_spec.MAX_LINEAR_ACCEL * DT / 0.5)
+    assert h[-1, 0] == h[-1, -2] and h[-1, 1] == h[-1, -1]
 
 
 def test_policy_mode_requires_a_model():
@@ -130,7 +131,8 @@ def test_escape_gives_up_to_idle_after_max_attempts():
     rig = Rig(max_escape_attempts=2)
     rig.core.request_mode(MODE_BASELINE)
     rig.flags = FLAG_STUCK
-    rig.run(2 * ESCAPE_TICKS)
+    res = rig.run(ESCAPE_TICKS + len(escape_plan(DT, 1)))      # E[0], then E[1]
+    assert all(r.mode == MODE_ESCAPE for r in res)
     res = rig.step()
     assert rig.core.mode == MODE_IDLE and 'escape failed 2 times' in res.reason
     assert commands(rig.run(3)) == []
@@ -270,11 +272,27 @@ def test_gating_off_is_b3():
     assert commands(res)[-1][1] == pytest.approx(0.4)
 
 
-def test_adapter_sees_history_up_to_previous_tick():
+def test_adapter_sees_current_obs_and_executed_command_pushed_before_inference():
+    """Council B2: the newest row is [obs_t, a_(t-1) executed], zero rows before it."""
     pol = FakePolicy()
     rig = Rig(policy=pol)
     rig.core.request_mode(MODE_POLICY)
+    first = rig.step()
+    row = pol.seen_history[-1]
+    assert row[:obs_spec.OBS_DIM].any() and not pol.seen_history[:-1].any()
+    assert not row[obs_spec.OBS_DIM:].any()                # nothing executed before t = 0
     rig.step()
-    assert not pol.seen_history.any()
+    v0, w0 = commands([first])[-1][1:]
+    np.testing.assert_allclose(pol.seen_history[-1][obs_spec.OBS_DIM:], [v0 / 0.5, w0 / 1.0],
+                               rtol=1e-6)
+    assert pol.seen_history[-2].any() and not pol.seen_history[-3].any()
+
+
+def test_history_is_cleared_when_a_driving_mode_is_selected():
+    pol = FakePolicy()
+    rig = Rig(policy=pol)
+    rig.core.request_mode(MODE_POLICY)
+    rig.run(5)
+    rig.core.request_mode(MODE_POLICY)
     rig.step()
-    assert pol.seen_history[-1].any() and not pol.seen_history[-2].any()
+    assert not pol.seen_history[:-1].any()

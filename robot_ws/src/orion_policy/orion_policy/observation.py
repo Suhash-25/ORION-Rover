@@ -2,13 +2,13 @@
 Turn ROS sensor data into the observation defined by orion_learning.obs_spec.
 
 Nothing here re-defines the observation layout: the builder only converts ROS inputs to the
-physical units that ``obs_spec.build_observation`` takes and calls it. Pure Python (no rclpy)
-so it can be unit-tested against obs_spec directly.
+physical units that ``obs_spec.build_observation`` takes and calls it. The adapter's
+history is orion_learning.history.History (used by core.py), the class training uses.
+Pure Python (no rclpy) so it can be unit-tested against obs_spec directly.
 """
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 import math
 from typing import Optional, Sequence
@@ -147,45 +147,3 @@ class ObservationBuilder:
         terrain = self._fresh('terrain_state', now)
         return obs_spec.build_observation(
             prev_cmd=prev_cmd, effort_max=self.effort_max, **joints, **imu, **terrain)
-
-
-class History:
-    """
-    The adapter's input: the last HISTORY_LEN rows of [obs, action], oldest first.
-
-    action is the command that was executed after obs, in obs_spec action units
-    (v / MAX_LINEAR_SPEED, w / MAX_ANGULAR_SPEED). Until HISTORY_LEN steps have been seen the
-    missing oldest rows are zeros.
-    """
-
-    ROW = obs_spec.OBS_DIM + obs_spec.ACTION_DIM
-
-    def __init__(self, length: int = obs_spec.HISTORY_LEN):
-        self._rows: deque = deque(maxlen=length)
-        self.length = length
-
-    def push(self, obs: np.ndarray, action: Sequence[float]) -> None:
-        row = np.concatenate([np.asarray(obs, dtype=np.float32),
-                              np.asarray(action, dtype=np.float32)])
-        if row.shape != (self.ROW,):
-            raise ValueError(f'history row has shape {row.shape}, expected ({self.ROW},)')
-        self._rows.append(row)
-
-    def clear(self) -> None:
-        self._rows.clear()
-
-    def __len__(self) -> int:
-        return len(self._rows)
-
-    def array(self) -> np.ndarray:
-        """float32 [length, OBS_DIM + ACTION_DIM], zero rows first while filling."""
-        out = np.zeros((self.length, self.ROW), dtype=np.float32)
-        if self._rows:
-            out[self.length - len(self._rows):] = np.stack(self._rows)
-        return out
-
-
-def twist_to_action(v: float, w: float) -> np.ndarray:
-    """(v m/s, w rad/s) in obs_spec action units, clipped to [-1, 1]."""
-    return np.clip(np.array([v / obs_spec.MAX_LINEAR_SPEED, w / obs_spec.MAX_ANGULAR_SPEED],
-                            dtype=np.float32), -1.0, 1.0)

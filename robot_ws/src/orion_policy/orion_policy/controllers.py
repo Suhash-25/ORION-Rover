@@ -11,12 +11,14 @@ from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import field
-from typing import Sequence
 
 import numpy as np
 from orion_learning import obs_spec
+from orion_learning.baselines import B0Params, SlipGovernor
 
 from .artefact import Artefact
+
+_SLIP = obs_spec.field_slice('slip_side')
 
 
 @dataclass
@@ -24,13 +26,13 @@ class ControlInput:
     """
     What a controller sees in one tick.
 
-    obs: float32 [OBS_DIM]; history: float32 [HISTORY_LEN, OBS_DIM + ACTION_DIM] up to the
-    previous tick; slip_side: TerrainState.slip_side (left, right); dt: tick period in s.
+    obs: float32 [OBS_DIM]; history: float32 [HISTORY_LEN, OBS_DIM + ACTION_DIM], the
+    adapter input whose newest row is [obs, previous executed command] (orion_learning.history);
+    dt: tick period in s.
     """
 
     obs: np.ndarray
     history: np.ndarray
-    slip_side: Sequence[float]
     dt: float
 
 
@@ -52,6 +54,9 @@ class Controller(ABC):
     def reset(self) -> None:
         """Forget internal state (called when the controller is (re)selected)."""
 
+    def after_escape(self) -> None:
+        """Notify that an escape that interrupted this controller has run to its end."""
+
     @abstractmethod
     def step(self, inp: ControlInput) -> ControlOutput:
         """One control tick."""
@@ -59,47 +64,34 @@ class Controller(ABC):
 
 class BaselineB0(Controller):
     """
-    B0, the non-RL baseline of SPEC section 6: cruise with a slip governor.
+    B0, the non-RL baseline of SPEC section 6, as a thin adapter around orion_learning.
 
-    The commanded speed is cruise_speed * fraction. While the worse side slips more than
-    slip_threshold (max of TerrainState.slip_side; positive = spinning) the fraction falls by
-    cut_rate per second (0.20 = 20 % of cruise per s), otherwise it recovers by recover_rate
-    per second, within [min_fraction, 1]. Heading is held open-loop (w = 0): the trial goal
-    line is straight ahead. Being stuck is handled outside the controller: SafetyStatus
-    FLAG_STUCK switches the mode machine to the scripted escape library (sequences.py).
-
-    min_fraction keeps the command above the stuck detector's 0.1 m/s gate (SPEC section 5)
-    so the governor cannot hide an entrapment from orion_safety.
-
-    NOTE for the integrator: WP4 implements the same B0 logic for the simulator in
-    learning/orion_learning/baselines.py. Keep one implementation and import it from the
-    other (this one has no ROS dependency).
+    The speed is orion_learning.baselines.SlipGovernor (cruise 0.3 m/s, -20 %/s of cruise while
+    the worse side's slip_side > 0.3, +5 %/s otherwise, within [0.4, 1], 0.5 after an escape),
+    fed the observation's slip_side exactly as in simulation. Heading is held open-loop
+    (w = 0). Being stuck is handled outside: SafetyStatus FLAG_STUCK makes the mode machine run
+    the next manoeuvre of the escape library E and then call after_escape(). The simulator's
+    B0Controller does the same in one class; test_learning_parity checks both give the same
+    commands.
     """
 
     name = 'B0'
 
-    def __init__(self, cruise_speed: float = 0.3, slip_threshold: float = 0.3,
-                 cut_rate: float = 0.20, recover_rate: float = 0.05,
-                 min_fraction: float = 0.4):
-        if not 0.0 < min_fraction <= 1.0:
-            raise ValueError('min_fraction must be in (0, 1]')
-        self.cruise_speed = cruise_speed
-        self.slip_threshold = slip_threshold
-        self.cut_rate = cut_rate
-        self.recover_rate = recover_rate
-        self.min_fraction = min_fraction
-        self.fraction = 1.0
+    def __init__(self, params: B0Params = B0Params(), dt: float = 1.0 / obs_spec.CONTROL_HZ):
+        if not 0.0 < params.min_scale <= 1.0:
+            raise ValueError('min_scale must be in (0, 1]')
+        self.governor = SlipGovernor(1, params, dt)
 
     def reset(self) -> None:
-        self.fraction = 1.0
+        self.governor.reset()
+
+    def after_escape(self) -> None:
+        """Restart the governor at B0Params.scale_after_escape once an escape has ended."""
+        self.governor.after_escape()
 
     def step(self, inp: ControlInput) -> ControlOutput:
-        if max(inp.slip_side) > self.slip_threshold:
-            self.fraction -= self.cut_rate * inp.dt
-        else:
-            self.fraction += self.recover_rate * inp.dt
-        self.fraction = min(1.0, max(self.min_fraction, self.fraction))
-        return ControlOutput(v=self.cruise_speed * self.fraction, w=0.0)
+        v = self.governor.step(np.asarray(inp.obs)[None, _SLIP])[0]
+        return ControlOutput(v=float(v), w=0.0)
 
 
 class OnnxController(Controller):
