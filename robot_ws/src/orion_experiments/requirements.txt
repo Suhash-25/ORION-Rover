@@ -1,0 +1,3 @@
+# Python dependencies of orion_experiments that have no rosdep key (CI: pip install -r this file).
+# orion_learning itself comes from this repo: pip install -e learning
+rosbags>=0.10
