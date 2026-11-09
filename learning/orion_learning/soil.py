@@ -153,6 +153,27 @@ def steady_drawbar_pull(s, W, soil: Soil, g, beta, m_fH=1.0, m_fR=1.0):
     return m_fH * thrust(s, z, W, soil) - m_fR * compaction_resistance(z, soil, g, beta)
 
 
+def steady_drawbar_curve(W, soil: Soil, g, beta, m_fH=1.0, m_fR=1.0) -> np.ndarray:
+    """Steady drawbar coefficient DP/W on DESCRIPTOR_SLIP_GRID, shape (..., 201).
+
+    W, g, beta, m_fH, m_fR and the soil fields broadcast against each other; the slip grid
+    is appended as the last axis.
+    """
+    ex = np.expand_dims
+    W = np.asarray(W, dtype=np.float64)
+    return steady_drawbar_pull(DESCRIPTOR_SLIP_GRID, ex(W, -1), soil.expand(),
+                               ex(np.asarray(g), -1), ex(np.asarray(beta), -1),
+                               ex(np.asarray(m_fH), -1), ex(np.asarray(m_fR), -1)) / ex(W, -1)
+
+
+def peak_drawbar_coefficient(W, soil: Soil, g, beta, m_fH=1.0, m_fR=1.0) -> np.ndarray:
+    """Peak over slip in [0, 1] of the steady drawbar coefficient DP/W (dimensionless).
+
+    Negative when the wheel cannot pull itself at any steady slip (it digs in instead).
+    """
+    return steady_drawbar_curve(W, soil, g, beta, m_fH, m_fR).max(axis=-1)
+
+
 def traction_descriptors(W, soil: Soil, g, beta, m_fH=1.0, m_fR=1.0) -> np.ndarray:
     """Functional traction descriptors of a wheel, shape (..., 4).
 
@@ -168,11 +189,8 @@ def traction_descriptors(W, soil: Soil, g, beta, m_fH=1.0, m_fR=1.0) -> np.ndarr
     dp30 = steady_drawbar_pull(DP_SLIP, W, soil, g, beta, m_fH, m_fR) / W
     rc = np.asarray(m_fR) * compaction_resistance(z0, soil, g, beta) / W
 
-    ex = np.expand_dims
     grid = DESCRIPTOR_SLIP_GRID
-    coeff = steady_drawbar_pull(grid, ex(W, -1), soil.expand(), ex(np.asarray(g), -1),
-                                ex(np.asarray(beta), -1), ex(np.asarray(m_fH), -1),
-                                ex(np.asarray(m_fR), -1)) / ex(W, -1)
+    coeff = steady_drawbar_curve(W, soil, g, beta, m_fH, m_fR)
     reached = coeff >= DP_TARGET
     any_reached = reached.any(axis=-1)
     idx = np.argmax(reached, axis=-1)                     # first grid index reaching target

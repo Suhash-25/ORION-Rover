@@ -11,11 +11,14 @@ Physics per substep (all SI):
   ground speed v_x - w_z y_i and lateral speed v_y + w_z x_i;
 * wheel load W_i = m g / 4 -+ m h a_x / (2 L) (front unloads under forward acceleration);
 * sinkage: static part z0(W_i) immediately; the slip part is dug towards
-  z_target(s_i) = z0 (1 + a_s |s| / (1 - |s| + 0.05)) at DIG_RATE (0.1 m per metre of slipped
-  rim travel |r w - v|) and relaxes "stickily", z <- max(z_target, z - 0.3 |v_long| dt), only
-  while the wheel travels onto fresh soil. (The SPEC jumps to z_target instantly; then the
-  start-up slip transient buries 84 % of randomised rovers within 1 s, median 0.3 s, before
-  any controller can react. With the dig rate the median is 2.8 s. See the engineering log.)
+  z_target(s_i) = z0 (1 + a_s |s| / (1 - |s| + 0.05)) at the episode's dig rate (m of sinkage
+  per metre of slipped rim travel |r w - v|, LogU(0.03, 0.3): model-form uncertainty, see
+  scripts/dig_rate_belly_out.py) and relaxes "stickily", z <- max(z_target, z - 0.3 |v_long|
+  dt), only while the wheel travels onto fresh soil. (The SPEC jumps to z_target instantly;
+  then the start-up slip transient buries 84 % of randomised rovers within 1 s, median 0.3 s,
+  before any controller can react. See the engineering log.)
+* multi-pass: the rear wheels run in the front wheels' compacted rut, modelled as k_phi x
+  U(1, 1.5) per episode on the rear wheels (which also lowers their static sinkage z0);
 * longitudinal force F_i = m_fH H_i - m_fR Rc_i tanh(v_long,i / 0.01 m/s) (Rc opposes travel);
 * lateral force Fy_i = -mu_y W_i tanh(v_lat,i / 0.05 m/s), with the per-wheel lateral speed,
   which gives the skid-steer yaw resistance;
@@ -29,7 +32,17 @@ Fy switch direction within 1-5 cm/s), so explicit Euler is unstable at dt = 12.5
 substep writes every contact force as a non-negative secant coefficient times a velocity
 (thrust = k (r w - v), Rc = c v, Fy = -d v_lat, coefficients taken at the current state) and
 solves the 7 velocities [w1..w4, v_x, v_y, w_z] implicitly with one batched 7x7 solve. The
-scheme is dissipative, so velocities never overshoot through zero.
+scheme is dissipative, so velocities never overshoot through zero, and the kinetic energy
+gained in a substep never exceeds the motor work (test_physics_energy.py). Known cost: the
+coefficients are frozen at the start-of-substep state (slip, sinkage, load, the tanh
+regularisers) and the load transfer uses the previous substep's acceleration, so the contact
+forces lag the state by one substep (12.5 ms); the sinkage is updated explicitly before the
+solve.
+
+Episode outcomes (see step()): success at the goal line; belly-out when any z >= 0.08 m
+(sim only: the rover cannot measure sinkage, so on hardware this event is unobservable and
+shows up later as ENTRAPPED or a timeout); ENTRAPPED (info key 'hard_stuck') by the rover's
+own orion_safety rule; leaving the fence; or the 60 s time limit.
 """
 
 from __future__ import annotations
@@ -61,11 +74,18 @@ PI_KI = 5.0                           # N m / rad
 RC_SPEED_EPS = 0.01                   # m/s, regularises the direction of Rc near standstill
 LATERAL_SPEED_EPS = 0.05              # m/s, from the SPEC lateral force law
 SINKAGE_RELAX = 0.3                   # sticky sinkage relaxation per metre travelled
-DIG_RATE = 0.1                        # GUESS: slip sinkage dug per metre of slipped rim travel
-BELLY_OUT_Z = 0.08                    # m
-HARD_STUCK_SPEED = 0.02               # m/s
-HARD_STUCK_CMD = 0.1                  # m/s rim speed
-HARD_STUCK_TIME = 10.0                # s
+BELLY_OUT_Z = 0.08                    # m (sim-only terminal: sinkage is not measured on the rover)
+# Stuck / ENTRAPPED rule of the rover, copied from orion_safety (monitor.py, config/safety.yaml;
+# test_entrapment.py fails if they drift apart). FLAG_STUCK: |cmd v| > 0.1 m/s and estimated
+# body speed < 0.03 m/s with confidence > 0.3, or side slip in the driven direction > 0.8,
+# held for 3 s. ENTRAPPED: a stuck episode older than 20 s whose last 20 s moved < 0.1 m.
+STUCK_CMD_LINEAR = 0.1                # m/s
+STUCK_BODY_SPEED = 0.03               # m/s
+STUCK_MIN_CONFIDENCE = 0.3
+STUCK_SLIP = 0.8
+STUCK_S = 3.0                         # s
+HARD_STUCK_WINDOW_S = 20.0            # s
+HARD_STUCK_PROGRESS_M = 0.1           # m
 FENCE_HALF = 1.0                      # m, 2 x 2 m sandbox centred at the origin
 START_XY = (-0.85, 0.0)               # m, start pose; goal line 1.5 m ahead along goal_dir
 GOAL_DIR = 0.0                        # rad, goal line normal (world x)
@@ -73,7 +93,14 @@ GOAL_DIR = 0.0                        # rad, goal line normal (world x)
 WHEEL_X = np.array([1, 1, -1, -1]) * WHEELBASE / 2      # FL FR RL RR
 WHEEL_Y = np.array([1, -1, 1, -1]) * TRACK / 2
 WHEEL_SIDE = np.array([0, 1, 0, 1])                       # 0 left, 1 right
+WHEEL_AXLE = np.array([0, 0, 1, 1])                       # 0 front, 1 rear
 LOAD_TRANSFER_SIGN = np.array([-1.0, -1.0, 1.0, 1.0])     # front unloads when accelerating
+WINDOW_STEPS = int(round(HARD_STUCK_WINDOW_S / DT))       # control steps in the ENTRAPPED window
+_K_PHI = soil_mod.SOIL_KEYS.index('k_phi')
+_A_S = soil_mod.SOIL_KEYS.index('a_s')
+_K = soil_mod.SOIL_KEYS.index('K')
+REJECTION_MAX_ROUNDS = 200            # rejection-sampling rounds before giving up (see sampler)
+NO_TIME = -1.0                        # 'no event' value of stuck_onset and entrapment_time
 
 # Flat-ground effort model in N.m, fitted on packed-light driving with
 # `python -m orion_learning.env --calibrate` (tests check the fit is still current).
@@ -109,17 +136,46 @@ class SoilRanges:
         ], axis=-1)
 
 
+# Independent loose-patch soil of the SPEC section 6 distribution (kept for evaluation only:
+# it is never passable, peak steady DP/W > 0 in 0 % of samples, council finding B1).
+SPEC_PATCH_SOIL = SoilRanges(k_c_kn=(0.5, 3.0), k_phi_kn=(400.0, 1000.0), n=(1.0, 1.3),
+                             c_kpa=(0.0, 0.5), phi_deg=(25.0, 30.0), K_m=(0.02, 0.04))
+
+
 @dataclass(frozen=True)
 class EnvConfig:
-    """Randomisation ranges and task constants (SPEC section 6). Defaults = training."""
+    """Randomisation ranges and task constants. Defaults = the TRAINING distribution.
+
+    The training distribution differs from SPEC section 6 (council finding B1; the SPEC
+    version, spec_eval_config(), is the evaluation distribution):
+
+    * the loose patch exists with probability p_patch, its centre y ~ U(patch_y), and its soil
+      is the episode's main (left) soil degraded multiplicatively (k_phi x LogU(0.4, 0.9),
+      a_s x U(1, 2), K x U(1, 1.5)) unless patch_soil gives independent ranges;
+    * mixture rejection sampling: with probability p_dp_restricted an episode's physics (soil,
+      beta, g, mass, multipliers) is redrawn until the rover-level peak steady DP/W at the
+      static load reaches the threshold; the threshold follows a linear curriculum from
+      dp_threshold[0] to dp_threshold[1] over dp_curriculum_steps env.step() calls.
+    """
 
     soil: SoilRanges = field(default_factory=SoilRanges)
     p_side_hetero: float = 0.5          # right side gets an independent soil sample
-    loose_patch: bool = True
+    p_patch: float = 0.5                # probability that the episode has a loose patch
     patch_radius_m: tuple[float, float] = (0.3, 0.6)
-    patch_soil: SoilRanges = field(default_factory=lambda: SoilRanges(
-        k_c_kn=(0.5, 3.0), k_phi_kn=(400.0, 1000.0), n=(1.0, 1.3), c_kpa=(0.0, 0.5),
-        phi_deg=(25.0, 30.0), K_m=(0.02, 0.04)))
+    patch_y_m: tuple[float, float] = (-0.9, 0.9)    # patch centre y (x ~ U(-0.6, 0.5))
+    patch_soil: SoilRanges | None = None            # None: degraded copy of the main soil
+    patch_k_phi_factor: tuple[float, float] = (0.4, 0.9)   # log-uniform
+    patch_a_s_factor: tuple[float, float] = (1.0, 2.0)
+    patch_K_factor: tuple[float, float] = (1.0, 1.5)
+    # Mixture rejection sampling on peak steady DP/W (dimensionless) with a curriculum.
+    p_dp_restricted: float = 0.4       # tuned to the 40-60 % B0 band (README; 0.7 gives ~70 %)
+    dp_threshold: tuple[float, float] = (0.08, 0.0)  # (start, end) of the curriculum
+    dp_curriculum_steps: int = 0        # env.step() calls to anneal over; 0 = end value now
+    # Model-form uncertainty and sensor / effort-model errors (council W2, m4, m5, m6).
+    dig_rate: tuple[float, float] = (0.03, 0.3)      # m per m of slipped rim travel, log-unif.
+    rear_k_phi_factor: tuple[float, float] = (1.0, 1.5)     # multi-pass compaction of rear
+    imu_bias_deg: tuple[float, float] = (-2.0, 2.0)  # constant roll and pitch bias each
+    i_ref_factor: tuple[float, float] = (0.7, 1.3)   # sinkage-proxy normaliser I_ref error
     beta: tuple[float, float] = (0.0, 1.0)
     gravity: tuple[float, float] = (1.62, 9.81)     # m/s^2, log-uniform
     mass_kg: tuple[float, float] = (12.0, 30.0)
@@ -158,6 +214,24 @@ class EnvConfig:
     def max_steps(self) -> int:
         return int(round(self.episode_s / DT))
 
+    def dp_threshold_at(self, env_steps: int) -> float:
+        """Rejection threshold on peak steady DP/W after env_steps env.step() calls."""
+        start, end = self.dp_threshold
+        if self.dp_curriculum_steps <= 0:
+            return float(end)
+        frac = min(1.0, max(0, env_steps) / self.dp_curriculum_steps)
+        return float(start + (end - start) * frac)
+
+
+def spec_eval_config(base: EnvConfig | None = None) -> EnvConfig:
+    """Return the SPEC section 6 randomisation as written: the EVALUATION distribution.
+
+    Patch always on, centre y ~ U(-0.4, 0.4), independent loose-patch soil ranges, no
+    rejection sampling. The model-form and sensor randomisation of base is kept.
+    """
+    return replace(base or EnvConfig(), p_patch=1.0, patch_y_m=(-0.4, 0.4),
+                   patch_soil=SPEC_PATCH_SOIL, p_dp_restricted=0.0)
+
 
 # --- Sandbox cells (SPEC section 8), as degenerate sampling ranges --------------------------
 CELL_MASS_KG = {'light': 14.0, 'heavy': 22.0}     # heavy = +8 kg ballast (GUESS)
@@ -179,17 +253,33 @@ def cell_config(cell: str, gravity: float = 9.81, base: EnvConfig | None = None)
     """Return the EnvConfig of a sandbox cell, e.g. 'light-packed', at the given gravity.
 
     Soil, mass and gravity are fixed; model-form multipliers are 1, no loose patch, no side
-    heterogeneity and no torque faults. Sensor noise, latency and fix dropouts stay random.
+    heterogeneity, no torque faults and no rejection sampling. Sensor noise and biases,
+    latency, fix dropouts, dig rate, rear multi-pass compaction and the I_ref error stay
+    random as in base.
     """
     mass_name, soil_name = cell.split('-')
     m = CELL_MASS_KG[mass_name]
     return replace(base or EnvConfig(), soil=CELL_SOIL[soil_name], p_side_hetero=0.0,
-                   loose_patch=False, beta=(CELL_BETA, CELL_BETA), gravity=(gravity, gravity),
-                   mass_kg=(m, m), m_fH=(1.0, 1.0), m_fR=(1.0, 1.0), mu_y=(0.5, 0.5),
-                   p_torque_fault=0.0)
+                   p_patch=0.0, p_dp_restricted=0.0, beta=(CELL_BETA, CELL_BETA),
+                   gravity=(gravity, gravity), mass_kg=(m, m), m_fH=(1.0, 1.0),
+                   m_fR=(1.0, 1.0), mu_y=(0.5, 0.5), p_torque_fault=0.0)
 
 
 CELLS = ('light-packed', 'light-loose', 'heavy-packed', 'heavy-loose')
+
+
+def peak_dp(phys: dict[str, np.ndarray]) -> np.ndarray:
+    """Rover-level analytic peak steady DP/W of an episode draw (dimensionless), shape (k,).
+
+    Static (nominal) wheel load W = m g / 4, the episode's beta and model-form multipliers,
+    both sides at a common slip: max over s of the mean of the left and right steady drawbar
+    curves. Ignores the loose patch, multi-pass and load transfer.
+    """
+    sides = soil_mod.Soil.from_stacked(np.stack([phys['left'], phys['right']], axis=1))
+    col = lambda key: phys[key][:, None]  # noqa: E731
+    curve = soil_mod.steady_drawbar_curve(col('mass') * col('g') / 4.0, sides, col('g'),
+                                          col('beta'), col('m_fH'), col('m_fR'))  # (k, 2, 201)
+    return curve.mean(axis=1).max(axis=-1)
 
 
 def _tanh_over_x(v, eps):
@@ -237,8 +327,15 @@ class OrionEnv:
         self.auto_reset = auto_reset
         self.record_substeps = record_substeps
         self.effort_model = SIM_EFFORT_MODEL
+        # Curriculum clock: env.step() calls so far (not part of the cloned state; set it to
+        # place a fresh env at a given point of the curriculum).
+        self.env_steps = 0
         self.seed(seed)
         self.state: dict[str, np.ndarray] = {}
+
+    def dp_threshold(self) -> float:
+        """Return the current rejection threshold on peak steady DP/W (curriculum)."""
+        return self.config.dp_threshold_at(self.env_steps)
 
     # --- seeding and state -------------------------------------------------------------------
     def seed(self, seed: int) -> None:
@@ -278,21 +375,60 @@ class OrionEnv:
                 'rng_params': snapshot['rng_params'], 'rng_noise': snapshot['rng_noise']}
 
     # --- episode sampling --------------------------------------------------------------------
-    def _sample_episode(self, idx: np.ndarray) -> None:
-        cfg, rng, k = self.config, self.rng_params, len(idx)
-        st = self.state
+    def _draw_physics(self, k: int) -> dict[str, np.ndarray]:
+        """One unconditional draw of the physics that sets the main-soil traction."""
+        cfg, rng = self.config, self.rng_params
         left = cfg.soil.sample(rng, k)
         other = cfg.soil.sample(rng, k)
         hetero = rng.random(k) < cfg.p_side_hetero
-        right = np.where(hetero[:, None], other, left)
-        patch = cfg.patch_soil.sample(rng, k)
-        st['soil'][idx] = np.stack([left, right, patch], axis=1)
-        st['beta'][idx] = rng.uniform(*cfg.beta, k)
-        st['g'][idx] = _logu(rng, *cfg.gravity, k)
-        st['mass'][idx] = rng.uniform(*cfg.mass_kg, k)
-        st['m_fH'][idx] = _logu(rng, *cfg.m_fH, k)
-        st['m_fR'][idx] = _logu(rng, *cfg.m_fR, k)
+        return {'left': left, 'right': np.where(hetero[:, None], other, left),
+                'beta': rng.uniform(*cfg.beta, k), 'g': _logu(rng, *cfg.gravity, k),
+                'mass': rng.uniform(*cfg.mass_kg, k), 'm_fH': _logu(rng, *cfg.m_fH, k),
+                'm_fR': _logu(rng, *cfg.m_fR, k)}
+
+    def _sample_physics(self, k: int) -> tuple[dict[str, np.ndarray], np.ndarray]:
+        """Mixture rejection sampling of the episode physics (EnvConfig docstring).
+
+        Returns the draw and whether each episode was restricted. A restricted episode is
+        redrawn whole until peak_dp(draw) >= threshold, so restricted episodes follow the
+        unconditional distribution conditioned on that event.
+        """
+        cfg, rng = self.config, self.rng_params
+        thr = self.dp_threshold()
+        restricted = rng.random(k) < cfg.p_dp_restricted
+        phys = self._draw_physics(k)
+        for _ in range(REJECTION_MAX_ROUNDS):
+            bad = np.flatnonzero(restricted)
+            bad = bad[peak_dp({key: v[bad] for key, v in phys.items()}) < thr]
+            if len(bad) == 0:
+                return phys, restricted
+            redraw = self._draw_physics(len(bad))
+            for key in phys:
+                phys[key][bad] = redraw[key]
+        raise RuntimeError(f'rejection sampling: no physics with peak DP/W >= {thr:.3f} '
+                           f'after {REJECTION_MAX_ROUNDS} rounds; lower dp_threshold')
+
+    def _sample_episode(self, idx: np.ndarray) -> None:
+        cfg, rng, k = self.config, self.rng_params, len(idx)
+        st = self.state
+        phys, restricted = self._sample_physics(k)
+        left = phys['left']
+        if cfg.patch_soil is None:      # degraded copy of the main soil
+            patch = left.copy()
+            patch[:, _K_PHI] *= _logu(rng, *cfg.patch_k_phi_factor, k)
+            patch[:, _A_S] *= rng.uniform(*cfg.patch_a_s_factor, k)
+            patch[:, _K] *= rng.uniform(*cfg.patch_K_factor, k)
+        else:
+            patch = cfg.patch_soil.sample(rng, k)
+        st['soil'][idx] = np.stack([left, phys['right'], patch], axis=1)
+        st['dp_restricted'][idx] = restricted
+        for key in ('beta', 'g', 'mass', 'm_fH', 'm_fR'):
+            st[key][idx] = phys[key]
         st['mu_y'][idx] = rng.uniform(*cfg.mu_y, k)
+        st['dig_rate'][idx] = _logu(rng, *cfg.dig_rate, k)
+        st['rear_k_phi'][idx] = rng.uniform(*cfg.rear_k_phi_factor, k)
+        st['imu_bias'][idx] = np.radians(rng.uniform(*cfg.imu_bias_deg, (k, 2)))
+        st['i_ref_factor'][idx] = rng.uniform(*cfg.i_ref_factor, k)
         st['latency'][idx] = rng.integers(cfg.latency_steps[0], cfg.latency_steps[1] + 1, k)
         fault = np.ones((k, 4))
         has_fault = rng.random(k) < cfg.p_torque_fault
@@ -302,17 +438,22 @@ class OrionEnv:
         st['fault'][idx] = fault
         heading = np.radians(rng.uniform(*cfg.heading_deg, k))
         # Loose patch somewhere between start and goal line, within the fence.
-        st['patch_on'][idx] = cfg.loose_patch
+        st['patch_on'][idx] = rng.random(k) < cfg.p_patch
         st['patch_r'][idx] = rng.uniform(*cfg.patch_radius_m, k)
-        st['patch_xy'][idx] = np.stack([rng.uniform(-0.6, 0.5, k), rng.uniform(-0.4, 0.4, k)], 1)
+        st['patch_xy'][idx] = np.stack([rng.uniform(-0.6, 0.5, k),
+                                        rng.uniform(*cfg.patch_y_m, k)], 1)
         st['dropout_prone'][idx] = rng.random(k) < cfg.p_fix_dropout
 
-        # Static descriptors of each soil set under the static wheel load.
+        # Static descriptors of each soil set (left, right, patch) x axle (front, rear: with
+        # the multi-pass k_phi factor) under the static wheel load.
         W = st['mass'][idx] * st['g'][idx] / 4.0
-        soil = soil_mod.Soil.from_stacked(st['soil'][idx])            # fields (k, 3)
+        sets = np.repeat(st['soil'][idx][:, :, None], 2, axis=2)        # (k, 3, 2, 7)
+        sets[:, :, 1, _K_PHI] *= st['rear_k_phi'][idx, None]
+        soil = soil_mod.Soil.from_stacked(sets)                           # fields (k, 3, 2)
+        ex = (slice(None), None, None)
         st['desc'][idx] = soil_mod.traction_descriptors(
-            W[:, None], soil, st['g'][idx, None], st['beta'][idx, None],
-            st['m_fH'][idx, None], st['m_fR'][idx, None])
+            W[ex], soil, st['g'][idx][ex], st['beta'][idx][ex], st['m_fH'][idx][ex],
+            st['m_fR'][idx][ex])
 
         # Kinematic state: at rest at the start pose, wheels at static sinkage.
         st['pose'][idx] = np.stack([np.full(k, START_XY[0]), np.full(k, START_XY[1]),
@@ -326,10 +467,8 @@ class OrionEnv:
         st['cmd'][idx] = 0.0
         st['act_buf'][idx] = 0.0
         st['prev_action'][idx] = 0.0
-        wheel_soil = soil_mod.Soil.from_stacked(np.take_along_axis(
-            st['soil'][idx], self._wheel_soil_index(idx)[:, :, None], axis=1))
-        st['z'][idx] = soil_mod.static_sinkage(W[:, None], wheel_soil, st['g'][idx, None],
-                                               st['beta'][idx, None])
+        st['z'][idx] = soil_mod.static_sinkage(W[:, None], self._wheel_soil(idx),
+                                               st['g'][idx, None], st['beta'][idx, None])
         # Estimator.
         st['v_est'][idx] = 0.0
         st['P'][idx] = FIX0_VAR
@@ -341,11 +480,20 @@ class OrionEnv:
         st['w_meas_prev'][idx] = 0.0
         # Episode bookkeeping.
         st['t'][idx] = 0
-        st['stuck_t'][idx] = 0.0
-        st['ss_speed_t'][idx] = 0.0
-        st['ss_slip_t'][idx] = 0.0
+        st['stuck_speed_n'][idx] = 0
+        st['stuck_slip_n'][idx] = 0
+        st['stuck_onset'][idx] = NO_TIME
+        st['xy_hist'][idx] = np.array(START_XY)       # the t = 0 sample of the 20 s window
         st['progress'][idx] = 0.0
         st['ep_return'][idx] = 0.0
+
+    def _wheel_soil(self, idx: np.ndarray) -> soil_mod.Soil:
+        """Soil under each wheel of rovers idx, fields (k, 4), rear multi-pass applied."""
+        st = self.state
+        per_wheel = np.take_along_axis(st['soil'][idx], self._wheel_soil_index(idx)[:, :, None],
+                                       axis=1)
+        per_wheel[:, :, _K_PHI] *= np.where(WHEEL_AXLE == 1, st['rear_k_phi'][idx, None], 1.0)
+        return soil_mod.Soil.from_stacked(per_wheel)
 
     def _wheel_soil_index(self, idx: np.ndarray) -> np.ndarray:
         """(k, 4) index into the soil sets (0 left, 1 right, 2 patch) for each wheel."""
@@ -362,8 +510,10 @@ class OrionEnv:
         n = self.num_envs
         f = lambda *shape: np.zeros((n,) + shape)  # noqa: E731
         self.state = {
-            'soil': f(3, len(soil_mod.SOIL_KEYS)), 'desc': f(3, 4), 'beta': f(), 'g': f(),
+            'soil': f(3, len(soil_mod.SOIL_KEYS)), 'desc': f(3, 2, 4), 'beta': f(), 'g': f(),
             'mass': f(), 'm_fH': f(), 'm_fR': f(), 'mu_y': f(),
+            'dp_restricted': np.zeros(n, dtype=bool), 'dig_rate': f(), 'rear_k_phi': f(),
+            'imu_bias': f(2), 'i_ref_factor': f(),
             'latency': np.zeros(n, dtype=np.int64), 'fault': f(4),
             'patch_on': np.zeros(n, dtype=bool), 'patch_r': f(), 'patch_xy': f(2),
             'dropout_prone': np.zeros(n, dtype=bool),
@@ -372,8 +522,12 @@ class OrionEnv:
             'prev_action': f(2),
             'v_est': f(), 'P': f(), 't_since_fix': f(), 'bias': f(2), 'dropout_left': f(),
             'slip_lp': f(2), 'resid_lp': f(), 'w_meas_prev': f(4),
-            't': np.zeros(n, dtype=np.int64), 'stuck_t': f(), 'ss_speed_t': f(),
-            'ss_slip_t': f(), 'progress': f(), 'ep_return': f(),
+            't': np.zeros(n, dtype=np.int64),
+            'stuck_speed_n': np.zeros(n, dtype=np.int64),   # consecutive steps of each
+            'stuck_slip_n': np.zeros(n, dtype=np.int64),    # stuck condition
+            'stuck_onset': f(),                 # s, episode time of FLAG_STUCK onset or NO_TIME
+            'xy_hist': f(WINDOW_STEPS + 1, 2),  # ring buffer of true x, y at every step
+            'progress': f(), 'ep_return': f(),
         }
 
     # --- public API ----------------------------------------------------------------------------
@@ -391,7 +545,7 @@ class OrionEnv:
         st = self.state
         idx = np.arange(self.num_envs)
         which = self._wheel_soil_index(idx)                               # (N, 4)
-        per_wheel = np.take_along_axis(st['desc'], which[:, :, None], axis=1)   # (N, 4, 4)
+        per_wheel = st['desc'][idx[:, None], which, WHEEL_AXLE[None, :]]  # (N, 4 wheels, 4)
         side = S.side_mean(np.moveaxis(per_wheel, 1, 2))                  # (N, 4 desc, 2)
         return np.concatenate([side.reshape(self.num_envs, 8),
                                (st['mass'] / S.NOMINAL_MASS_KG)[:, None],
@@ -408,9 +562,8 @@ class OrionEnv:
         applied = st['act_buf'][np.arange(n), st['latency'] - 1]          # (N, 2) v, w
         w_cmd = (applied[:, :1] - applied[:, 1:2] * WHEEL_Y[None, :]) / R
 
-        soil_idx = self._wheel_soil_index(np.arange(n))
-        wsoil = soil_mod.Soil.from_stacked(np.take_along_axis(
-            st['soil'], soil_idx[:, :, None], axis=1))
+        self.env_steps += 1
+        wsoil = self._wheel_soil(np.arange(n))
         z_max = st['z'].max(axis=1)
         subs = []
         for _ in range(SUBSTEPS):
@@ -427,18 +580,20 @@ class OrionEnv:
         st['progress'] = d
         st['t'] += 1
         vx = st['vel'][:, 0]
-        commanding = np.max(np.abs(R * w_cmd), axis=1) > HARD_STUCK_CMD
-        st['stuck_t'] = np.where(commanding & (np.abs(vx) < HARD_STUCK_SPEED),
-                                 st['stuck_t'] + DT, 0.0)
+        obs, sensors = self._observe()
+        flag_stuck, hard_stuck = self._entrapment_rule(sensors)
         success = d >= cfg.goal_m
         belly = z_max >= BELLY_OUT_Z
-        hard_stuck = st['stuck_t'] >= HARD_STUCK_TIME - 1e-9    # sums of DT: round-off
         fence = np.any(np.abs(pose[:, :2]) > FENCE_HALF, axis=1)
         failed = (belly | hard_stuck | fence) & ~success
         terminated = success | failed
         truncated = (st['t'] >= cfg.max_steps) & ~terminated
+        elapsed = st['t'] * DT
+        # Entrapment time for the critic labels: belly-out when it happens; ENTRAPPED at the
+        # onset of the stuck episode that ended in it (council M2, same anchor as the rover).
+        entrap_time = np.where(belly & ~success, elapsed,
+                               np.where(hard_stuck & ~success, st['stuck_onset'], NO_TIME))
 
-        obs, sensors = self._observe()
         slip_true = physical_slip(st['w'], vx[:, None] - st['vel'][:, 2:3] * WHEEL_Y[None, :])
 
         # Reward (weights SPEC section 6; shaping terms scaled per second).
@@ -455,18 +610,11 @@ class OrionEnv:
                   + cfg.w_step * remaining * failed)
         st['ep_return'] += reward
 
-        # Soft-stuck flag on estimated quantities (SPEC section 5 stuck rule).
-        cmd_v = st['cmd'][:, 0]
-        slow = (cmd_v > 0.1) & (sensors['body_speed'] < 0.03) & (sensors['confidence'] > 0.3)
-        st['ss_speed_t'] = np.where(slow, st['ss_speed_t'] + DT, 0.0)
-        st['ss_slip_t'] = np.where(sensors['slip_side'].max(axis=1) > 0.8,
-                                   st['ss_slip_t'] + DT, 0.0)
-        soft_stuck = (st['ss_speed_t'] >= 3.0 - 1e-9) | (st['ss_slip_t'] >= 3.0 - 1e-9)
-
-        elapsed = st['t'] * DT
         info = {
             'success': success, 'belly_out': belly & ~success, 'hard_stuck': hard_stuck & ~success,
-            'out_of_fence': fence & ~success, 'soft_stuck': soft_stuck,
+            'out_of_fence': fence & ~success, 'soft_stuck': flag_stuck,
+            'stuck_onset': st['stuck_onset'].copy(), 'entrapment_time': entrap_time,
+            'episode_time': elapsed,
             'slip_true': slip_true, 'sinkage': st['z'].copy(), 'body_speed_true': vx.copy(),
             'progress': d.copy(), 'sensors': sensors, 'applied_twist': applied.copy(),
             'cmd_twist': st['cmd'].copy(),
@@ -480,13 +628,53 @@ class OrionEnv:
             info['episode_return'] = st['ep_return'].copy()
             info['episode_length'] = st['t'].copy()
             info['effective_speed'] = np.maximum(d, 0.0) / elapsed
-            info['episode_time'] = elapsed
+            info['episode_restricted'] = st['dp_restricted'].copy()
             if self.auto_reset:
                 idx = np.flatnonzero(done)
                 self._sample_episode(idx)
                 obs[idx], _ = self._observe(idx, init=True)
         info['privileged'] = self.privileged()
         return obs, reward.astype(np.float32), terminated, truncated, info
+
+    def _entrapment_rule(self, sensors: dict) -> tuple[np.ndarray, np.ndarray]:
+        """orion_safety's stuck and hard-stuck rules (monitor.py), vectorised at 20 Hz.
+
+        Inputs are what the rover's monitor sees: the command sent to the drive (the
+        rate-limited twist), the terrain estimates (body speed, confidence, low-passed side
+        slip) and the camera pose (here the true pose; the monitor's odometer fallback during
+        camera loss is not modelled). Must run after st['t'] was advanced and the pose
+        integrated. Returns (FLAG_STUCK, ENTRAPPED) per rover and updates the stuck timers,
+        the stuck-episode onset and the 20 s pose window.
+        """
+        st = self.state
+        n = self.num_envs
+        cmd_v = st['cmd'][:, 0]
+        driving = np.abs(cmd_v) > STUCK_CMD_LINEAR
+        no_motion = (driving & (np.abs(sensors['body_speed']) < STUCK_BODY_SPEED)
+                     & (sensors['confidence'] > STUCK_MIN_CONFIDENCE))
+        slip = sensors['slip_side']
+        # Wheels spinning in the driven direction (slip is negative when reversing).
+        spin = np.where(driving, np.max(np.sign(cmd_v)[:, None] * slip, axis=1),
+                        np.max(np.abs(slip), axis=1))
+        # monitor._Held: true once the condition has held for >= STUCK_S since its first
+        # true sample, i.e. on the (STUCK_S / DT + 1)-th consecutive step.
+        st['stuck_speed_n'] = np.where(no_motion, st['stuck_speed_n'] + 1, 0)
+        st['stuck_slip_n'] = np.where(spin > STUCK_SLIP, st['stuck_slip_n'] + 1, 0)
+        held = lambda count: (count - 1) * DT >= STUCK_S - 1e-9  # noqa: E731
+        stuck = held(st['stuck_speed_n']) | held(st['stuck_slip_n'])
+
+        t = st['t']
+        now = t * DT
+        st['xy_hist'][np.arange(n), t % (WINDOW_STEPS + 1)] = st['pose'][:, :2]
+        oldest = st['xy_hist'][np.arange(n), np.maximum(t - WINDOW_STEPS, 0) % (WINDOW_STEPS + 1)]
+        progress = np.hypot(*(st['pose'][:, :2] - oldest).T)
+        window_full = t >= WINDOW_STEPS
+        onset = np.where(progress >= HARD_STUCK_PROGRESS_M, NO_TIME, st['stuck_onset'])
+        onset = np.where(stuck & (onset < 0.0), now, onset)
+        st['stuck_onset'] = onset
+        entrapped = (stuck & (now - onset >= HARD_STUCK_WINDOW_S - 1e-9) & window_full
+                     & (progress < HARD_STUCK_PROGRESS_M))
+        return stuck, entrapped
 
     # --- physics -------------------------------------------------------------------------------
     def _substep(self, w_cmd, wsoil) -> None:
@@ -507,13 +695,13 @@ class OrionEnv:
                                              / (2.0 * WHEELBASE))[:, None]
         W = np.maximum(W, 0.05 * W_static)
 
-        # Sinkage: static part instantly, slip part dug at DIG_RATE x slipped rim travel,
+        # Sinkage: static part instantly, slip part dug at the dig rate x slipped rim travel,
         # relaxing (sticky) only as the wheel travels onto fresh soil.
         s = physical_slip(w, v_long)
         z0 = soil_mod.static_sinkage(W, wsoil, g[:, None], beta)
         z_t = np.minimum(soil_mod.slip_sinkage_target(z0, s, wsoil.a_s), R)
         z = st['z']
-        z_up = np.minimum(z_t, np.maximum(z + DIG_RATE * np.abs(u) * dt, z0))
+        z_up = np.minimum(z_t, np.maximum(z + st['dig_rate'][:, None] * np.abs(u) * dt, z0))
         z_down = np.maximum(z_t, z - SINKAGE_RELAX * np.abs(v_long) * dt)
         z = np.where(z_t > z, z_up, z_down)
         st['z'] = z
@@ -521,6 +709,8 @@ class OrionEnv:
         # Secant "conductances": every contact force is written as coefficient x velocity
         # with a non-negative coefficient taken at the current state, then the velocities are
         # solved implicitly. Dissipative and unconditionally stable, no overshoot through 0.
+        # The coefficients are NOT re-evaluated at the new velocities (no Newton iteration):
+        # forces lag the state by one substep, accepted for DT_SUB = 12.5 ms (council W1).
         H = st['m_fH'][:, None] * soil_mod.thrust(s, z, W, wsoil)
         den = np.maximum(np.maximum(np.abs(R * w), np.abs(v_long)), S.SLIP_FLOOR_MPS)
         hmax = st['m_fH'][:, None] * soil_mod.max_thrust(z, W, wsoil)
@@ -587,7 +777,7 @@ class OrionEnv:
         st['wheel_angle'] = st['wheel_angle'] + w_new * dt
 
     def tilt(self, idx: np.ndarray | None = None):
-        """(roll, pitch) in rad from the wheel sinkage pattern (flat sandbox floor).
+        """Return the true (roll, pitch) in rad from the wheel sinkage (flat sandbox floor).
 
         Positive pitch = nose down (front sinks deeper); positive roll = right side down.
         """
@@ -595,6 +785,12 @@ class OrionEnv:
         pitch = np.arctan((z[:, :2].mean(1) - z[:, 2:].mean(1)) / WHEELBASE)
         roll = np.arctan((z[:, [1, 3]].mean(1) - z[:, [0, 2]].mean(1)) / TRACK)
         return roll, pitch
+
+    def measured_tilt(self, idx: np.ndarray):
+        """Return the IMU (roll, pitch) in rad: true tilt plus the constant mounting bias."""
+        roll, pitch = self.tilt(idx)
+        bias = self.state['imu_bias'][idx]
+        return roll + bias[:, 0], pitch + bias[:, 1]
 
     def _substep_record(self) -> dict[str, np.ndarray]:
         st = self.state
@@ -629,7 +825,7 @@ class OrionEnv:
         start = st['dropout_prone'][idx] & (left <= 0.0) & onset & (not init)
         left = np.where(start, dur, np.maximum(left - DT, 0.0))
         has_fix = left <= 0.0
-        roll, pitch = self.tilt(idx)
+        roll, pitch = self.measured_tilt(idx)
         if init:
             v, P = fix_v, np.full(n, FIX0_VAR)
             t_fix = np.zeros(n)
@@ -650,7 +846,8 @@ class OrionEnv:
         st['slip_lp'][idx], st['resid_lp'][idx] = slip_lp, resid_lp
         st['w_meas_prev'][idx] = w_meas
         conf = est.speed_confidence(t_fix, est.wheel_odometry_speed(w_meas), v)
-        proxy = est.sinkage_proxy(resid_lp, self.effort_model.ref)
+        # I_ref is only known to +-30 % on the rover (council m6): randomised per episode.
+        proxy = est.sinkage_proxy(resid_lp, self.effort_model.ref * st['i_ref_factor'][idx])
         obs = S.build_observation(
             prev_cmd=st['cmd'][idx], wheel_speed=w_meas, wheel_effort=eff_meas,
             effort_max=sim_effort_max, body_accel_xy=acc_meas, yaw_rate=yaw_meas, roll=roll,
