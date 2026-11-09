@@ -3,7 +3,7 @@
 <package format="3">
   <name>orion_sim_tests</name>
   <version>0.1.0</version>
-  <description>Headless Gazebo smoke tests: the rover spawns, its controllers come up, it drives, and Nav2 reaches a goal.</description>
+  <description>Headless Gazebo smoke tests: the rover spawns, its controllers come up, it drives, the e-stop stops it through twist_mux, and Nav2 reaches a goal.</description>
   <maintainer email="suhasacharya0525@gmail.com">Suhas</maintainer>
   <license>MIT</license>
 
@@ -19,6 +19,9 @@
   <test_depend>nav2_msgs</test_depend>
   <test_depend>tf2_ros_py</test_depend>
   <test_depend>std_srvs</test_depend>
+  <test_depend>std_msgs</test_depend>
+  <test_depend>orion_msgs</test_depend>
+  <test_depend>orion_safety</test_depend>
   <test_depend>orion_bringup</test_depend>
   <test_depend>navigation2</test_depend>
 

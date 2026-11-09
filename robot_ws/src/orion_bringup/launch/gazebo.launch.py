@@ -22,6 +22,7 @@ def generate_launch_description():
     gazebo_pkg = get_package_share_directory("ros_gz_sim")
     bridge_pkg = get_package_share_directory("ros_gz_bridge")
     control_pkg = get_package_share_directory("orion_control")
+    safety_pkg = get_package_share_directory("orion_safety")
 
     declare_world = DeclareLaunchArgument(
         "world",
@@ -47,6 +48,14 @@ def generate_launch_description():
         default_value="true",
         description="Open the keyboard teleop terminal once controllers are up",
     )
+    # Passed to xacro as hardware:=... ; orion_description selects the ros2_control plugin
+    # with it (gazebo = gz_ros2_control). xacro ignores the argument until that exists.
+    declare_hardware = DeclareLaunchArgument(
+        "hardware",
+        default_value="gazebo",
+        choices=["gazebo", "serial"],
+        description="ros2_control hardware passed to the URDF xacro",
+    )
     headless = LaunchConfiguration("headless")
     gz_args = PythonExpression([
         "'-r -s --headless-rendering ' if '", headless,
@@ -61,7 +70,7 @@ def generate_launch_description():
     )
 
     robot_description = ParameterValue(
-        Command(["xacro ", xacro_file]),
+        Command(["xacro ", xacro_file, " hardware:=", LaunchConfiguration("hardware")]),
         value_type=str,
     )
 
@@ -137,11 +146,34 @@ def generate_launch_description():
         launch_arguments={"teleop": LaunchConfiguration("teleop")}.items(),
     )
 
+    # Every command source goes through twist_mux (docs/INTERFACES.md); orion_safety owns
+    # the safety/estop inputs. Both start with the simulator: orion_safety's startup grace
+    # covers the time until /joint_states and /imu/data first arrive.
+    twist_mux = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(control_pkg, "launch", "twist_mux.launch.py")
+        ),
+        launch_arguments={"use_sim_time": "true"}.items(),
+    )
+
+    safety = Node(
+        package="orion_safety",
+        executable="safety_node",
+        name="orion_safety",
+        output="screen",
+        parameters=[
+            os.path.join(safety_pkg, "config", "safety.yaml"),
+            os.path.join(safety_pkg, "config", "safety_sim.yaml"),
+            {"use_sim_time": True},
+        ],
+    )
+
     return LaunchDescription(
         [
             declare_world,
             declare_headless,
             declare_teleop,
+            declare_hardware,
             gazebo,
             clock_bridge,
             robot_state_publisher,
@@ -153,5 +185,7 @@ def generate_launch_description():
             ),
             spawn,
             bridge,
+            twist_mux,
+            safety,
         ]
     )

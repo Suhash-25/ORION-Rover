@@ -1,0 +1,42 @@
+# twist_mux: every command source -> /diff_drive_controller/cmd_vel (docs/INTERFACES.md).
+# The highest-priority input that published within its timeout wins.
+#
+# Type: Jazzy twist_mux (4.x) subscribes and publishes geometry_msgs/TwistStamped when
+# use_stamped is true (4.5.0 defaults to true, but older 4.x builds did not: set explicitly).
+# All inputs and the output (cmd_vel_out, remapped in twist_mux.launch.py) are TwistStamped,
+# which is what Jazzy's diff_drive_controller requires. Headers pass through unchanged, so
+# every source must stamp with the node clock (sim time in Gazebo): the controller drops
+# commands older than its cmd_vel_timeout (0.5 s).
+twist_mux:
+  ros__parameters:
+    use_stamped: true
+    topics:
+      estop:        # orion_safety: zero twist while ESTOP is latched
+        topic: /cmd_vel/estop
+        timeout: 0.5
+        priority: 255
+      teleop:       # human operator; can drive out of a HALT, never out of ESTOP
+        topic: /cmd_vel/teleop
+        timeout: 0.5
+        priority: 200
+      safety:       # orion_safety: zero twist while HALT or ESTOP
+        topic: /cmd_vel/safety
+        timeout: 0.5
+        priority: 150
+      escape:       # orion_policy scripted / learned escape behaviour
+        topic: /cmd_vel/escape
+        timeout: 0.5
+        priority: 120
+      policy:       # orion_policy (baseline B0 or learned policy)
+        topic: /cmd_vel/policy
+        timeout: 0.5
+        priority: 100
+      nav:          # Nav2 controller_server / behavior_server
+        topic: /cmd_vel/nav
+        timeout: 0.5
+        priority: 50
+    locks:
+      estop:        # std_msgs/Bool; true masks every input below priority 255
+        topic: /orion/estop
+        timeout: 0.0
+        priority: 255

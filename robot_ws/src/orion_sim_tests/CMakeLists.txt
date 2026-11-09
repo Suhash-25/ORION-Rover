@@ -12,6 +12,8 @@ if(BUILD_TESTING)
     ENV ROS_DOMAIN_ID=61 GZ_PARTITION=orion_test_drive)
   add_launch_test(test/test_nav.py TIMEOUT 360
     ENV ROS_DOMAIN_ID=62 GZ_PARTITION=orion_test_nav)
+  add_launch_test(test/test_safety.py TIMEOUT 300
+    ENV ROS_DOMAIN_ID=71 GZ_PARTITION=orion_wp1_safety)
 endif()
 
 ament_package()
