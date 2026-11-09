@@ -29,6 +29,7 @@ setup(
             'plan_session = orion_experiments.protocol:main',
             'analyse_trials = orion_experiments.analysis:main',
             'phase0_power = orion_experiments.power:main',
+            'imu_check = orion_experiments.imu_check:main',
         ],
     },
 )
