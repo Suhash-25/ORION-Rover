@@ -193,11 +193,16 @@ def test_leaving_the_fence_terminates():
 
 
 def test_stored_effort_model_is_current():
+    """A refit on other seeds predicts the same effort over the driving range (c0 and c1 trade
+    off against each other inside the informative window, so coefficients are not compared)."""
     fresh = E.calibrate_effort_model(seed=3, num_envs=16, steps=200)
     stored = E.SIM_EFFORT_MODEL
-    assert fresh.c0 == pytest.approx(stored.c0, abs=0.05)
-    assert fresh.c1 == pytest.approx(stored.c1, abs=0.02)
-    assert fresh.c2 == pytest.approx(stored.c2, abs=0.01)
+    w, dw = np.meshgrid(np.linspace(0.5, 4.2, 12), np.linspace(-2.0, 2.0, 5))
+    for sign in (1.0, -1.0):
+        args = (sign * w[..., None], sign * dw[..., None], np.zeros(w.shape))
+        diff = np.max(np.abs(fresh.predict(*args) - stored.predict(*args)))
+        assert diff < 0.04 * stored.ref           # N.m: at most 0.04 in sinkage-proxy units
+    assert fresh.coefficients[3] == 0.0 and stored.ref == pytest.approx(E.TAU_MAX - 0.30494)
 
 
 def test_sinkage_proxy_separates_packed_from_loose():
@@ -215,6 +220,28 @@ def test_speed_estimate_degrades_during_dropouts():
                   dropout_duration_s=(5.0, 5.0))
     env = E.OrionEnv(8, cfg, seed=0, auto_reset=False)
     env.reset()
-    conf = [info['sensors']['confidence'] for *_, info in
+    sens = [info['sensors'] for *_, info in
             (env.step(np.tile(CRUISE, (8, 1))) for _ in range(60))]
-    assert np.mean(conf[-1]) < est.speed_confidence(3.0, 0.0, 0.0) + 0.05
+    conf = np.array([s['confidence'] for s in sens])
+    assert np.mean(conf[-1]) < est.speed_confidence(3.0, 0.0) + 0.05
+    # The env reports the shared formula on its own Kalman state (same code as the rover).
+    s = sens[-1]
+    assert np.allclose(conf[-1], est.speed_confidence(s['time_since_fix'], s['speed_std']))
+    assert np.all(s['time_since_fix'][~s['has_fix']] > 0.0)
+
+
+def test_effort_residual_held_outside_informative_window():
+    """Turning hard (|yaw| > 0.2 rad/s) or standing still freezes the residual (as on the rover)."""
+    env = E.OrionEnv(2, E.cell_config('heavy-loose'), seed=0, auto_reset=False)
+    env.reset()
+    _roll(env, 40)
+    before = env.state['resid_lp'].copy()
+    for _ in range(10):
+        _, _, _, _, info = env.step(np.zeros((2, 2)))        # wheels slow down and stop
+    stopped = np.abs(info['sensors']['wheel_speed']) < est.INFORMATIVE_MIN_WHEEL_SPEED
+    assert stopped.any()
+    held = env.state['resid_lp'][stopped]
+    for _ in range(5):
+        env.step(np.zeros((2, 2)))
+    assert np.array_equal(env.state['resid_lp'][stopped], held)
+    assert not np.array_equal(before, env.state['resid_lp'])

@@ -40,6 +40,7 @@ from typing import Any
 
 import numpy as np
 
+from orion_learning import baselines
 from orion_learning import estimator as est
 from orion_learning import obs_spec as S
 from orion_learning import soil as soil_mod
@@ -77,7 +78,7 @@ LOAD_TRANSFER_SIGN = np.array([-1.0, -1.0, 1.0, 1.0])     # front unloads when a
 
 # Flat-ground effort model in N.m, fitted on packed-light driving with
 # `python -m orion_learning.env --calibrate` (tests check the fit is still current).
-SIM_EFFORT_MODEL = est.EffortModel(c0=0.6872, c1=0.04705, c2=0.01767, c3=0.0, ref=2.3128)
+SIM_EFFORT_MODEL = est.EffortModel(np.array([0.30494, 0.14439, 0.04765, 0.0]), ref=2.69506)
 
 
 def _logu(rng, lo, hi, size):
@@ -342,8 +343,8 @@ class OrionEnv:
         # Episode bookkeeping.
         st['t'][idx] = 0
         st['stuck_t'][idx] = 0.0
-        st['ss_speed_t'][idx] = 0.0
-        st['ss_slip_t'][idx] = 0.0
+        st['ss_speed_t'][idx] = np.nan       # held time of each stuck condition, NaN = false
+        st['ss_slip_t'][idx] = np.nan
         st['progress'][idx] = 0.0
         st['ep_return'][idx] = 0.0
 
@@ -371,7 +372,7 @@ class OrionEnv:
             'pi_int': f(4), 'acc': f(2), 'tau_cmd': f(4), 'cmd': f(2), 'act_buf': f(4, 2),
             'prev_action': f(2),
             'v_est': f(), 'P': f(), 't_since_fix': f(), 'bias': f(2), 'dropout_left': f(),
-            'slip_lp': f(2), 'resid_lp': f(), 'w_meas_prev': f(4),
+            'slip_lp': f(2), 'resid_lp': f(4), 'w_meas_prev': f(4),
             't': np.zeros(n, dtype=np.int64), 'stuck_t': f(), 'ss_speed_t': f(),
             'ss_slip_t': f(), 'progress': f(), 'ep_return': f(),
         }
@@ -455,13 +456,14 @@ class OrionEnv:
                   + cfg.w_step * remaining * failed)
         st['ep_return'] += reward
 
-        # Soft-stuck flag on estimated quantities (SPEC section 5 stuck rule).
-        cmd_v = st['cmd'][:, 0]
-        slow = (cmd_v > 0.1) & (sensors['body_speed'] < 0.03) & (sensors['confidence'] > 0.3)
-        st['ss_speed_t'] = np.where(slow, st['ss_speed_t'] + DT, 0.0)
-        st['ss_slip_t'] = np.where(sensors['slip_side'].max(axis=1) > 0.8,
-                                   st['ss_slip_t'] + DT, 0.0)
-        soft_stuck = (st['ss_speed_t'] >= 3.0 - 1e-9) | (st['ss_slip_t'] >= 3.0 - 1e-9)
+        # Soft-stuck flag on estimated quantities: orion_safety's stuck rule (SPEC section 5).
+        no_motion, spin = baselines.stuck_conditions(
+            st['cmd'][:, 0], sensors['body_speed'], sensors['confidence'], sensors['slip_side'],
+            sensors['time_since_fix'])
+        st['ss_speed_t'] = baselines.held_for(st['ss_speed_t'], no_motion, DT)
+        st['ss_slip_t'] = baselines.held_for(st['ss_slip_t'], spin, DT)
+        hold = baselines.STUCK_RULE.hold_s - 1e-9
+        soft_stuck = (st['ss_speed_t'] >= hold) | (st['ss_slip_t'] >= hold)
 
         elapsed = st['t'] * DT
         info = {
@@ -630,12 +632,15 @@ class OrionEnv:
         left = np.where(start, dur, np.maximum(left - DT, 0.0))
         has_fix = left <= 0.0
         roll, pitch = self.tilt(idx)
+        # Effort residual per wheel; only informative samples move its low-pass (else held),
+        # exactly as orion_terrain does.
+        informative = est.informative_mask(w_meas, yaw_meas)
         if init:
             v, P = fix_v, np.full(n, FIX0_VAR)
             t_fix = np.zeros(n)
             slip = S.side_mean(S.wheel_slip(w_meas, v, yaw_meas))
             resid = self.effort_model.residual(eff_meas, w_meas, np.zeros((n, 4)), pitch)
-            slip_lp, resid_lp = slip, resid
+            slip_lp, resid_lp = slip, np.where(informative, resid, 0.0)
         else:
             v, P = est.kf_predict(st['v_est'][idx], st['P'][idx], acc_meas[:, 0], DT)
             v, P = est.kf_update(v, P, fix_v, has_fix)
@@ -644,13 +649,13 @@ class OrionEnv:
             dw_dt = (w_meas - st['w_meas_prev'][idx]) / DT
             resid = self.effort_model.residual(eff_meas, w_meas, dw_dt, pitch)
             slip_lp = est.lowpass(st['slip_lp'][idx], slip, DT)
-            resid_lp = est.lowpass(st['resid_lp'][idx], resid, DT)
+            resid_lp = est.lowpass(st['resid_lp'][idx], resid, DT, mask=informative)
         st['bias'][idx], st['dropout_left'][idx] = bias, left
         st['v_est'][idx], st['P'][idx], st['t_since_fix'][idx] = v, P, t_fix
         st['slip_lp'][idx], st['resid_lp'][idx] = slip_lp, resid_lp
         st['w_meas_prev'][idx] = w_meas
-        conf = est.speed_confidence(t_fix, est.wheel_odometry_speed(w_meas), v)
-        proxy = est.sinkage_proxy(resid_lp, self.effort_model.ref)
+        conf = est.speed_confidence(t_fix, np.sqrt(P))
+        proxy = self.effort_model.proxy(resid_lp)
         obs = S.build_observation(
             prev_cmd=st['cmd'][idx], wheel_speed=w_meas, wheel_effort=eff_meas,
             effort_max=sim_effort_max, body_accel_xy=acc_meas, yaw_rate=yaw_meas, roll=roll,
@@ -659,7 +664,8 @@ class OrionEnv:
         sensors = {'wheel_speed': w_meas, 'wheel_effort': eff_meas, 'accel': acc_meas,
                    'yaw_rate': yaw_meas, 'roll': roll, 'pitch': pitch, 'body_speed': v,
                    'confidence': conf, 'slip_side': slip_lp, 'sinkage_proxy': proxy,
-                   'has_fix': has_fix, 'fix_speed': fix_v, 'accel_bias': bias}
+                   'has_fix': has_fix, 'fix_speed': fix_v, 'accel_bias': bias,
+                   'time_since_fix': t_fix, 'speed_std': np.sqrt(P)}
         return obs, sensors
 
 
@@ -671,16 +677,17 @@ def calibrate_effort_model(seed: int = 0, num_envs: int = 32, steps: int = 400,
     """Fit the flat-ground effort model the way the rover does (SPEC section 4).
 
     Drives `num_envs` rovers in the given cell with random piecewise-constant commands
-    (held 1 s), and least-squares fits |effort| on [1, |w|, dw/dt sgn(w)] using the measured
-    (noisy) wheel speeds and efforts. The slope term c3 is fixed at 0: the simulated sandbox
-    is flat, pitch only comes from uneven sinkage, so c3 is unidentifiable here (a free fit
-    returns a large noise-driven value). ref = tau_max - c0 (stall minus free effort).
+    (held 1 s), and fits est.fit_effort_model (the fit orion_terrain uses, informative samples
+    only) on the measured (noisy) wheel speeds and efforts, pooled over the 4 identical wheels.
+    The slope term c3 is fixed at 0: the simulated sandbox is flat, pitch only comes from
+    uneven sinkage, so c3 is unidentifiable here (a free fit returns a large noise-driven
+    value). ref = tau_max - c0 (stall minus free effort).
     """
     env = OrionEnv(num_envs, cell_config(cell), seed=seed, auto_reset=True)
-    env.effort_model = est.EffortModel(0.0, 0.0, 0.0, 0.0, TAU_MAX)
+    env.effort_model = est.EffortModel(np.zeros(4), TAU_MAX)
     env.reset()
     rng = np.random.default_rng(seed)
-    rows, targets = [], []
+    data = {'w': [], 'dw_dt': [], 'effort': [], 'pitch': [], 'yaw_rate': []}
     w_prev = None
     action = np.zeros((num_envs, 2))
     for k in range(steps):
@@ -691,13 +698,16 @@ def calibrate_effort_model(seed: int = 0, num_envs: int = 32, steps: int = 400,
         sens = info['sensors']
         w = sens['wheel_speed']
         if w_prev is not None:
-            rows.append(est.EffortModel.features(w, (w - w_prev) / DT, sens['pitch']))
-            targets.append(np.abs(sens['wheel_effort']))
+            for key, value in (('w', w), ('dw_dt', (w - w_prev) / DT),
+                               ('effort', sens['wheel_effort']), ('pitch', sens['pitch']),
+                               ('yaw_rate', sens['yaw_rate'])):
+                data[key].append(value)
         w_prev = w
-    X = np.concatenate(rows).reshape(-1, 4)
-    y = np.concatenate(targets).reshape(-1)
-    coef = np.linalg.lstsq(X[:, :3], y, rcond=None)[0]
-    return est.EffortModel(*(float(c) for c in coef), c3=0.0, ref=float(TAU_MAX - coef[0]))
+    per_wheel = {k: np.concatenate(data[k]).reshape(-1, 1) for k in ('w', 'dw_dt', 'effort')}
+    per_rover = {k: np.repeat(np.concatenate(data[k]), 4) for k in ('pitch', 'yaw_rate')}
+    fit = est.fit_effort_model(**per_wheel, **per_rover, fit_slope=False)
+    c = fit.coefficients[0]
+    return est.EffortModel(np.round(c, 5), ref=round(float(TAU_MAX - c[0]), 5))
 
 
 if __name__ == '__main__':  # pragma: no cover - maintenance entry point
@@ -706,4 +716,5 @@ if __name__ == '__main__':  # pragma: no cover - maintenance entry point
     ap.add_argument('--calibrate', action='store_true',
                     help='refit SIM_EFFORT_MODEL on light-packed driving and print it')
     if ap.parse_args().calibrate:
-        print(calibrate_effort_model())
+        m = calibrate_effort_model()
+        print(f'coefficients={m.coefficients.tolist()}, ref={m.ref}')

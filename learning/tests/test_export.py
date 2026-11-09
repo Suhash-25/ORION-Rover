@@ -44,6 +44,7 @@ def test_manifest_and_hashes(student_dir):
     out, manifest, *_ = student_dir
     disk = json.loads((out / 'manifest.json').read_text())
     assert disk['controller'] == 'student' and disk['obs_spec_hash'] == S.OBS_SPEC_HASH
+    assert disk['obs_semantics'] == json.loads(json.dumps(S.SEMANTICS))
     assert disk['files'] == {'adapter': 'adapter.onnx', 'policy': 'policy.onnx',
                              'critic': 'critic.onnx'}
     for f, h in disk['sha256'].items():

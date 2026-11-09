@@ -5,7 +5,9 @@ orion_policy). If training and runtime disagree on anything here, the policy sil
 gets garbage on the real rover, so nothing else may re-define these layouts.
 
 Changing anything below changes OBS_SPEC_HASH, and orion_policy refuses to load an ONNX
-model exported with a different hash.
+model exported with a different hash. The hash covers the layout AND the semantics (SEMANTICS:
+history convention, confidence formula, low-pass, Kalman and effort-model constants), because
+a model trained on one meaning of a field is as wrong on another as on a shuffled layout.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ import json
 from typing import Mapping, Sequence
 
 import numpy as np
+
+from orion_learning import estimator as _est
 
 # --- Robot geometry (must match orion_description/urdf/common/constants.xacro) -------------
 WHEEL_RADIUS_M = 0.12
@@ -80,8 +84,28 @@ PRIVILEGED_FIELDS: tuple[Field, ...] = (
 PRIVILEGED_DIM = sum(f.size for f in PRIVILEGED_FIELDS)
 
 
+# History convention (implemented once, in orion_learning.history): row k of the adapter input
+# is [obs_k, a_(k-1)], a_(k-1) = the command actually executed on the previous step in action
+# units (= obs_k's prev_cmd), pushed before inference, oldest first, zero rows before the
+# first observation of an episode.
+HISTORY_CONVENTION = 'row_k=[obs_k,executed a_(k-1)=obs_k.prev_cmd],push-before-infer,zero-pad'
+PREV_CMD_MEANING = 'rate-limited command actually sent (rover: after safety scaling)'
+
+# What the fields MEAN beyond their layout; hashed together with the layout.
+SEMANTICS: dict = {
+    'history': HISTORY_CONVENTION,
+    'prev_cmd': PREV_CMD_MEANING,
+    'confidence': _est.CONFIDENCE_FORMULA,
+    'lowpass': [_est.LOWPASS_FORMULA, _est.LOWPASS_TAU_S],
+    'kalman': [_est.KF_ACCEL_SIGMA, _est.FIX_SIGMA_EXTERNAL, _est.FIX_SIGMA_LIDAR],
+    'effort': [_est.EFFORT_FORMULA, _est.INFORMATIVE_MIN_WHEEL_SPEED,
+               _est.INFORMATIVE_MAX_YAW_RATE],
+}
+
+
 def _layout() -> dict:
     return {
+        'semantics': SEMANTICS,
         'obs': [(f.name, f.size, f.unit) for f in OBS_FIELDS],
         'privileged': [(f.name, f.size, f.unit) for f in PRIVILEGED_FIELDS],
         'scales': [WHEEL_RADIUS_M, TRACK_WIDTH_M, MAX_LINEAR_SPEED, MAX_ANGULAR_SPEED,
