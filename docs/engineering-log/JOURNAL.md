@@ -156,3 +156,22 @@ official ROS apt servers are blocked there. CI on GitHub uses the official apt p
   message to the user named the wrong account (M-009).
 - The user chose to push from their own PC (suhasintern) over Remote Control. The four
   branches were sent to the device as a git bundle, with the PR bodies as files.
+
+### 12:20 Push done from the user's PC
+- The 4 section branches are on GitHub. The user opens the draft PRs from the compare links,
+  because their PC has no gh CLI.
+- 12:28 The user reported PR 1's CI as red (orion_description installs `rviz/`, which doesn't
+  exist). As the PR 1 body says, this is expected: section 2 fixes it.
+
+### 12:30 Council review delivered
+- Full text: council/2026-11-09-integration-review.md.
+- Blockers:
+  - B1: every training episode crosses an impassable patch.
+  - B2: the history convention differs between training and deployment.
+  - B3: there are two escape libraries.
+- Plan changed: three parallel coding agents on disjoint files.
+  - FIX-A: learning distribution, plus M1, M2 (env side), M9, W1, W2 and m4-m6.
+  - FIX-B: shared history, escape, B0 and estimator, plus M4-M7 (estimator side).
+  - FIX-C: statistics, labels, the safety rule, docs and M8.
+- M3 was put to the user as a decision. Recommended: drop the effect-size gate. FIX-C builds
+  the rule behind one switch.
