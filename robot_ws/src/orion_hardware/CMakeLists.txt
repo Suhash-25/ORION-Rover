@@ -82,6 +82,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_firmware_link test/test_firmware_link.cpp)
   target_link_libraries(test_firmware_link ${PROJECT_NAME})
 
+  ament_add_gtest(test_safety_gates test/test_safety_gates.cpp)
+  target_link_libraries(test_safety_gates ${PROJECT_NAME})
+
   ament_add_gtest(test_orion_system test/test_orion_system.cpp ENV ROS_DOMAIN_ID=72)
   target_link_libraries(test_orion_system ${PROJECT_NAME})
 

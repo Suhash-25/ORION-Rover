@@ -103,6 +103,16 @@ OrionSystem::CallbackReturn OrionSystem::on_init(
     "OrionSystem: port %s @ %d, encoder_cpr %.0f, gear_ratio %.3f, R %.3f ohm, kt %.4f N m/A",
     drive_.port.c_str(), drive_.baud, drive_.encoder_cpr, drive_.gear_ratio,
     drive_.motor_resistance, drive_.kt);
+  {
+    std::lock_guard<std::mutex> lock(gate_mutex_);
+    perturbation_ = PerturbationGate(drive_.perturbation_max_rad_s);
+    estop_ = EstopLatch(drive_.safety_timeout_s);
+  }
+  if (drive_.perturbation_max_rad_s > 0.0) {
+    RCLCPP_WARN(
+      get_logger(), "Wheel perturbation ENABLED on %s, bound %.2f rad/s (fault injection)",
+      kPerturbationTopic, drive_.perturbation_max_rad_s);
+  }
   return CallbackReturn::SUCCESS;
 }
 
@@ -199,6 +209,12 @@ OrionSystem::CallbackReturn OrionSystem::on_configure(const rclcpp_lifecycle::St
     estop_sub_ = node->create_subscription<std_msgs::msg::Bool>(
       kEstopTopic, rclcpp::QoS(10),
       [this](std_msgs::msg::Bool::ConstSharedPtr msg) {on_estop(msg->data);});
+    safety_sub_ = node->create_subscription<orion_msgs::msg::SafetyStatus>(
+      kSafetyTopic, rclcpp::QoS(10),
+      [this](orion_msgs::msg::SafetyStatus::ConstSharedPtr msg) {on_safety_status(msg->state);});
+    perturbation_sub_ = node->create_subscription<orion_msgs::msg::WheelPerturbation>(
+      kPerturbationTopic, rclcpp::QoS(10),
+      [this](orion_msgs::msg::WheelPerturbation::ConstSharedPtr msg) {on_perturbation(*msg);});
   }
 
   // Fill the state interfaces once so controllers start from the real wheel positions.
@@ -216,6 +232,8 @@ void OrionSystem::release_link()
   {
     std::lock_guard<std::mutex> lock(link_mutex_);
     estop_sub_.reset();
+    safety_sub_.reset();
+    perturbation_sub_.reset();
     health_timer_.reset();
     health_pub_.reset();
     old.swap(link_);
@@ -269,6 +287,10 @@ OrionSystem::CallbackReturn OrionSystem::on_activate(const rclcpp_lifecycle::Sta
 OrionSystem::CallbackReturn OrionSystem::on_deactivate(const rclcpp_lifecycle::State &)
 {
   active_ = false;
+  {
+    std::lock_guard<std::mutex> lock(gate_mutex_);
+    perturbation_.cancel();
+  }
   send_idle();
   return CallbackReturn::SUCCESS;
 }
@@ -320,7 +342,23 @@ return_type OrionSystem::write(const rclcpp::Time &, const rclcpp::Duration &)
   if (!l || l->failed()) {
     return return_type::ERROR;
   }
-  if (estop_requested_) {
+  bool estop = false;
+  bool stale_cancel = false;
+  PerturbationGate::Offsets offsets{};
+  {
+    std::lock_guard<std::mutex> lock(gate_mutex_);
+    const auto now = FirmwareLink::Clock::now();
+    estop = estop_.latched();
+    if (perturbation_.active() && !safety_ok_locked(now)) {
+      perturbation_.cancel();  // HALT/ESTOP cancel in the callbacks; this catches staleness
+      stale_cancel = true;
+    }
+    offsets = perturbation_.offsets(now);
+  }
+  if (stale_cancel) {
+    RCLCPP_WARN(get_logger(), "Wheel perturbation cancelled: SafetyStatus stale or not OK");
+  }
+  if (estop) {
     l->send_estop();  // repeated every cycle: the latch is idempotent, a lost frame is not
     return return_type::OK;
   }
@@ -330,7 +368,8 @@ return_type OrionSystem::write(const rclcpp::Time &, const rclcpp::Duration &)
   op::CmdMsg cmd;
   cmd.flags = op::cmd_flag::kEnable | (drive_.brake_on_idle ? op::cmd_flag::kBrakeOnIdle : 0);
   for (size_t i = 0; i < joints_.size(); ++i) {
-    const double w = get_command<double>(names_[i].command);
+    // offsets[i] belongs to the i-th URDF joint (FL FR RL RR in orion_description).
+    const double w = get_command<double>(names_[i].command) + offsets[i];
     cmd.w_target_mrad_s[joints_[i].motor_index] = rad_s_to_mrad_s(joints_[i].direction * w);
   }
   l->send_cmd(cmd);  // a dropped frame is counted; the next one follows in one cycle
@@ -343,12 +382,93 @@ void OrionSystem::on_estop(bool engaged)
   if (!l) {
     return;
   }
-  if (engaged && !estop_requested_.exchange(true)) {
+  EstopLatch::Action action;
+  bool cancelled = false;
+  bool released_latched = false;
+  {
+    std::lock_guard<std::mutex> lock(gate_mutex_);
+    released_latched = !engaged && estop_.topic_engaged() && estop_.latched();
+    action = estop_.on_estop_topic(engaged);
+    if (engaged && perturbation_.active()) {
+      perturbation_.cancel();
+      cancelled = true;
+    }
+  }
+  if (action == EstopLatch::Action::kSendEstop) {
     l->send_estop();
     RCLCPP_WARN(get_logger(), "E-stop engaged: ESTOP sent to firmware");
-  } else if (!engaged && estop_requested_.exchange(false)) {
+  }
+  if (cancelled) {
+    RCLCPP_WARN(get_logger(), "Wheel perturbation cancelled by the e-stop");
+  }
+  if (action == EstopLatch::Action::kSendClear) {
     l->send_estop_clear();
-    RCLCPP_WARN(get_logger(), "E-stop released: ESTOP_CLEAR sent to firmware");
+    RCLCPP_WARN(
+      get_logger(), "E-stop released after orion_safety accepted the reset: ESTOP_CLEAR sent "
+      "to firmware");
+  } else if (released_latched) {
+    RCLCPP_WARN(
+      get_logger(), "E-stop released: firmware stays latched until orion_safety accepts "
+      "/orion/estop_reset");
+  }
+}
+
+bool OrionSystem::safety_ok_locked(FirmwareLink::Clock::time_point now) const
+{
+  const auto max_age = std::chrono::duration<double>(drive_.safety_timeout_s);
+  return have_safety_ && now - safety_rx_ <= max_age &&
+         safety_state_ <= safety_state::kLimited && !estop_.latched();
+}
+
+void OrionSystem::on_safety_status(uint8_t state)
+{
+  auto l = link();
+  if (!l) {
+    return;
+  }
+  bool clear_now = false;
+  bool cancelled = false;
+  {
+    std::lock_guard<std::mutex> lock(gate_mutex_);
+    have_safety_ = true;
+    safety_state_ = state;
+    safety_rx_ = FirmwareLink::Clock::now();
+    if (state >= safety_state::kHalt && perturbation_.active()) {
+      perturbation_.cancel();
+      cancelled = true;
+    }
+    clear_now = estop_.on_safety_state(state, safety_rx_) == EstopLatch::Action::kSendClear;
+  }
+  if (cancelled) {
+    RCLCPP_WARN(get_logger(), "Wheel perturbation cancelled by safety state %u", state);
+  }
+  if (clear_now) {
+    l->send_estop_clear();
+    RCLCPP_WARN(
+      get_logger(), "orion_safety accepted the e-stop reset: ESTOP_CLEAR sent to firmware");
+  }
+}
+
+void OrionSystem::on_perturbation(const orion_msgs::msg::WheelPerturbation & msg)
+{
+  PerturbationGate::Offsets offsets;
+  for (size_t i = 0; i < offsets.size(); ++i) {
+    offsets[i] = msg.offsets[i];
+  }
+  std::string why;
+  {
+    std::lock_guard<std::mutex> lock(gate_mutex_);
+    const auto now = FirmwareLink::Clock::now();
+    why = perturbation_.request(offsets, msg.duration_s, safety_ok_locked(now), now);
+  }
+  if (!why.empty()) {
+    RCLCPP_WARN(get_logger(), "WheelPerturbation rejected: %s", why.c_str());
+  } else if (msg.duration_s > 0.0f) {
+    RCLCPP_INFO(
+      get_logger(), "WheelPerturbation [%.3f %.3f %.3f %.3f] rad/s for %.2f s", offsets[0],
+      offsets[1], offsets[2], offsets[3], msg.duration_s);
+  } else {
+    RCLCPP_INFO(get_logger(), "WheelPerturbation cancelled by request");
   }
 }
 

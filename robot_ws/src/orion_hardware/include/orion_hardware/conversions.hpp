@@ -27,6 +27,8 @@ struct DriveConfig
   double state_timeout_s = 0.1;        // STATE older than this -> read() returns ERROR
   double health_rate_hz = 10.0;        // orion_msgs/RoverHealth publish rate
   bool brake_on_idle = false;          // short the motors when idle instead of coasting
+  double perturbation_max_rad_s = 0.0; // bound of orion_msgs/WheelPerturbation; 0 = disabled
+  double safety_timeout_s = 0.5;       // SafetyStatus older than this cancels a perturbation
 };
 
 /// Per-joint parameters from <joint><param>.

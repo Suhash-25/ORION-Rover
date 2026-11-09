@@ -24,6 +24,9 @@
   <!-- motor terminal resistance, ohm (GUESS) -->
   <xacro:arg name="motor_resistance" default="0.5"/>
   <xacro:arg name="brake_on_idle" default="false"/>
+  <!-- bound (rad/s per wheel) of orion_msgs/WheelPerturbation on /orion/wheel_perturbation,
+       the fault-injection hook; 0 = disabled (docs/INTERFACES.md) -->
+  <xacro:arg name="perturbation_max_rad_s" default="0.0"/>
 
   <xacro:macro name="orion_ros2_control">
 
@@ -53,6 +56,7 @@
           <param name="kt">$(arg kt)</param>
           <param name="motor_resistance">$(arg motor_resistance)</param>
           <param name="brake_on_idle">$(arg brake_on_idle)</param>
+          <param name="perturbation_max_rad_s">$(arg perturbation_max_rad_s)</param>
         </xacro:if>
 
       </hardware>

@@ -9,8 +9,9 @@ lidar_launch:=... . Without an IMU driver orion_safety HALTs after its startup g
 by design: the rover must not drive without tilt protection.
 
 The drive-train values (port, baud, encoder_cpr, gear_ratio, kt, motor_resistance,
-brake_on_idle) are launch arguments forwarded to the xacro; their defaults are the GUESSES of
-orion_description/urdf/control/ros2_control.xacro (test_robot_launch checks they agree).
+brake_on_idle) and perturbation_max_rad_s are launch arguments forwarded to the xacro; their
+defaults are the values (GUESSES) of orion_description/urdf/control/ros2_control.xacro
+(test_robot_launch checks they agree).
 """
 
 import os
@@ -41,6 +42,8 @@ DRIVE_ARGS = {
     "kt": ("0.0", "Motor torque constant N m/A; 0 disables back-EMF correction"),
     "motor_resistance": ("0.5", "Motor terminal resistance, ohm (GUESS)"),
     "brake_on_idle": ("false", "Short the motors when idle instead of coasting"),
+    "perturbation_max_rad_s": ("0.0", "Bound of /orion/wheel_perturbation offsets, rad/s; "
+                                      "0 disables the fault-injection hook"),
 }
 
 

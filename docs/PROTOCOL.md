@@ -82,7 +82,7 @@ after the board's polarity config and the joint's `direction` param.
 | 0x05 | PING | host -> fw | on configure | 0 |
 | 0x06 | PONG | fw -> host | reply | 7 |
 | 0x07 | ESTOP | host -> fw | on e-stop, then every cycle while engaged | 0 |
-| 0x08 | ESTOP_CLEAR | host -> fw | once on release | 4 |
+| 0x08 | ESTOP_CLEAR | host -> fw | once, after orion_safety accepted the reset | 4 |
 | 0x09 | LOG | fw -> host | events | 0..64 ASCII |
 | 0x0A | STATS **[ext]** | fw -> host | 1 Hz | 24 |
 
@@ -203,9 +203,22 @@ link, then configure + activate the hardware component again.
 rx CRC+framing errors + firmware rx CRC+framing errors, `watchdog_trips` from STATS, `duty[4]`
 in slot order FL FR RL RR, `current_sensed` = no wheel reports 0x7FFF.
 
-`/orion/estop` (`std_msgs/Bool`, any reliable publisher, e.g. orion_safety at 50 Hz): a false
--> true edge sends ESTOP immediately and every write() cycle after it instead of CMD; a
-true -> false edge sends one ESTOP_CLEAR. The host never clears a latch it did not see set.
+`/orion/estop` (`std_msgs/Bool`, any reliable publisher): a false -> true edge sends ESTOP
+immediately and every write() cycle after it instead of CMD. Releasing the topic does **not**
+clear the latch (council m1): one ESTOP_CLEAR is sent only when `/orion/estop` is false and
+`/orion/safety_status` has shown STATE_ESTOP after the latch and then left it within 0.5 s of
+the last ESTOP status (a longer gap means orion_safety restarted and forgot it), which only an
+accepted `/orion/estop_reset` (`confirm: "CLEAR ESTOP"`) does (`EstopLatch` in
+`orion_hardware/safety_gates.hpp`). Without a running orion_safety the firmware stays latched.
+The host never clears a latch it did not see set.
+
+`/orion/wheel_perturbation` (`orion_msgs/WheelPerturbation`, reserved for Round 7 fault
+injection): `offsets[i]` (rad/s, URDF sign) is added to joint i's commanded velocity before the
+CMD conversion above, for `duration_s`. Off unless the hardware parameter
+`perturbation_max_rad_s` > 0 (xacro / launch argument, default 0); a message with any
+|offset| above it is rejected, as is one while SafetyStatus is not NOMINAL / LIMITED, older
+than `safety_timeout_s` (0.5 s) or while e-stopped. SafetyStatus HALT / ESTOP, a stale
+SafetyStatus, `/orion/estop` true and deactivation cancel an active one.
 
 ## 6. Changing the protocol
 

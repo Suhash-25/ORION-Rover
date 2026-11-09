@@ -51,7 +51,7 @@ def test_every_drive_arg_is_declared_and_forwarded(launch_module):
     assert set(launch_module.DRIVE_ARGS) <= declared
     values = {'port': '/tmp/orion_host', 'baud': '115200', 'encoder_cpr': '1234',
               'gear_ratio': '17', 'kt': '0.03', 'motor_resistance': '0.9',
-              'brake_on_idle': 'true'}
+              'brake_on_idle': 'true', 'perturbation_max_rad_s': '0.4'}
     assert set(values) == set(launch_module.DRIVE_ARGS)
     params = render(launch_module, **values)
     assert {k: params[k] for k in values} == values

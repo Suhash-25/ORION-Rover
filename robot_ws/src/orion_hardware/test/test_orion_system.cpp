@@ -14,12 +14,15 @@
 #include "mock_transport.hpp"
 #include "orion_hardware/orion_system.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "orion_msgs/msg/safety_status.hpp"
+#include "orion_msgs/msg/wheel_perturbation.hpp"
 #include "std_msgs/msg/bool.hpp"
 
 using orion_hardware::OrionSystem;
 using orion_hardware_test::MockTransport;
 using hardware_interface::return_type;
 using CallbackReturn = OrionSystem::CallbackReturn;
+using SafetyStatus = orion_msgs::msg::SafetyStatus;
 namespace op = orion_proto;
 using namespace std::chrono_literals;
 
@@ -140,6 +143,63 @@ protected:
     ADD_FAILURE() << "no command interface for " << joint;
   }
 
+  size_t count(uint8_t type)
+  {
+    size_t n = 0;
+    for (const auto & f : frames_from_host(*shared)) {
+      n += f.type == type ? 1 : 0;
+    }
+    return n;
+  }
+
+  /// Processes callbacks for `d` of wall time (spin_some returns as soon as the queue is empty).
+  void spin(std::chrono::milliseconds d)
+  {
+    const auto end = std::chrono::steady_clock::now() + d;
+    while (std::chrono::steady_clock::now() < end) {
+      executor->spin_some(1ms);
+      std::this_thread::sleep_for(1ms);
+    }
+  }
+
+  /// The CMD frame that write() sends now.
+  op::CmdMsg last_cmd()
+  {
+    EXPECT_EQ(write(), return_type::OK);
+    op::CmdMsg cmd;
+    const auto frames = frames_from_host(*shared);
+    EXPECT_TRUE(!frames.empty() && op::decode_msg(frames.back(), cmd)) << "last frame not a CMD";
+    return cmd;
+  }
+
+  static void publish_safety(rclcpp::Publisher<SafetyStatus> & pub, uint8_t state)
+  {
+    SafetyStatus s;
+    s.state = state;
+    pub.publish(s);
+  }
+
+  /// Publishes SafetyStatus `state` for up to 1 s; true once an ESTOP_CLEAR has been sent.
+  bool publish_safety_until(rclcpp::Publisher<SafetyStatus> & pub, uint8_t state)
+  {
+    for (int i = 0; i < 100; ++i) {
+      publish_safety(pub, state);
+      spin(10ms);
+      if (count(op::MSG_ESTOP_CLEAR) > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static orion_msgs::msg::WheelPerturbation perturbation(float fl, float duration_s)
+  {
+    orion_msgs::msg::WheelPerturbation m;
+    m.offsets = {fl, 0.0f, 0.0f, 0.0f};
+    m.duration_s = duration_s;
+    return m;
+  }
+
   return_type read() {return system->read(rclcpp::Time(0), rclcpp::Duration(10ms));}
   return_type write() {return system->write(rclcpp::Time(0), rclcpp::Duration(10ms));}
 
@@ -242,27 +302,22 @@ TEST_F(OrionSystemTest, WriteSendsMappedTargetsOnlyWhileActive)
   EXPECT_EQ(cmd.w_target_mrad_s[0], 0);
 }
 
-TEST_F(OrionSystemTest, EstopTopicForwardsEstopAndClear)
+TEST_F(OrionSystemTest, EstopClearWaitsForTheResetConfirmedByOrionSafety)
 {
   ASSERT_EQ(init(urdf()), CallbackReturn::SUCCESS);
   ASSERT_EQ(system->on_configure(lifecycle_state), CallbackReturn::SUCCESS);
   ASSERT_EQ(system->on_activate(lifecycle_state), CallbackReturn::SUCCESS);
   auto node = rclcpp::Node::make_shared("estop_test_publisher");
   auto pub = node->create_publisher<std_msgs::msg::Bool>(OrionSystem::kEstopTopic, 10);
+  auto safety = node->create_publisher<orion_msgs::msg::SafetyStatus>(
+    OrionSystem::kSafetyTopic, 10);
 
-  auto count = [&](uint8_t type) {
-    size_t n = 0;
-    for (const auto & f : frames_from_host(*shared)) {
-      n += f.type == type ? 1 : 0;
-    }
-    return n;
-  };
   auto publish_until = [&](bool value, uint8_t type) {
     for (int i = 0; i < 200 && count(type) == 0; ++i) {
       std_msgs::msg::Bool m;
       m.data = value;
       pub->publish(m);
-      executor->spin_some(10ms);
+      spin(10ms);
     }
     return count(type) > 0;
   };
@@ -273,7 +328,141 @@ TEST_F(OrionSystemTest, EstopTopicForwardsEstopAndClear)
   EXPECT_EQ(count(op::MSG_CMD), cmds) << "no wheel commands while e-stopped";
   EXPECT_EQ(count(op::MSG_ESTOP), estops + 1) << "ESTOP repeated every cycle";
 
-  ASSERT_TRUE(publish_until(false, op::MSG_ESTOP_CLEAR));
+  // Releasing /orion/estop is not a reset: the firmware stays latched.
+  EXPECT_FALSE(publish_until(false, op::MSG_ESTOP_CLEAR));
+  ASSERT_EQ(write(), return_type::OK);
+  EXPECT_EQ(count(op::MSG_CMD), cmds);
+  EXPECT_EQ(count(op::MSG_ESTOP), estops + 2);
+
+  // orion_safety latched it (ESTOP), then accepted the reset (NOMINAL).
+  EXPECT_FALSE(publish_safety_until(*safety, SafetyStatus::STATE_ESTOP));
+  ASSERT_TRUE(publish_safety_until(*safety, SafetyStatus::STATE_NOMINAL));
   ASSERT_EQ(write(), return_type::OK);
   EXPECT_EQ(count(op::MSG_CMD), cmds + 1);
+}
+
+TEST_F(OrionSystemTest, EstopStaysLatchedWithoutOrionSafety)
+{
+  ASSERT_EQ(init(urdf()), CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_configure(lifecycle_state), CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_activate(lifecycle_state), CallbackReturn::SUCCESS);
+  auto node = rclcpp::Node::make_shared("estop_test_publisher");
+  auto pub = node->create_publisher<std_msgs::msg::Bool>(OrionSystem::kEstopTopic, 10);
+  auto safety = node->create_publisher<orion_msgs::msg::SafetyStatus>(
+    OrionSystem::kSafetyTopic, 10);
+  for (bool value : {true, false}) {
+    for (int i = 0; i < 50; ++i) {
+      std_msgs::msg::Bool m;
+      m.data = value;
+      pub->publish(m);
+      spin(10ms);
+    }
+  }
+  ASSERT_GT(count(op::MSG_ESTOP), 0u);
+  // A status that never showed ESTOP is no evidence that orion_safety saw this e-stop.
+  EXPECT_FALSE(publish_safety_until(*safety, SafetyStatus::STATE_NOMINAL));
+  EXPECT_EQ(count(op::MSG_ESTOP_CLEAR), 0u);
+}
+
+TEST_F(OrionSystemTest, WheelPerturbationIsDisabledByDefault)
+{
+  ASSERT_EQ(init(urdf()), CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_configure(lifecycle_state), CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_activate(lifecycle_state), CallbackReturn::SUCCESS);
+  auto node = rclcpp::Node::make_shared("perturbation_test_publisher");
+  auto safety = node->create_publisher<orion_msgs::msg::SafetyStatus>(
+    OrionSystem::kSafetyTopic, 10);
+  auto perturb = node->create_publisher<orion_msgs::msg::WheelPerturbation>(
+    OrionSystem::kPerturbationTopic, 10);
+  publish_safety_until(*safety, SafetyStatus::STATE_NOMINAL);
+  for (int i = 0; i < 20; ++i) {
+    perturb->publish(perturbation(0.5, 5.0));
+    spin(10ms);
+  }
+  EXPECT_EQ(last_cmd().w_target_mrad_s[0], 0);
+}
+
+TEST_F(OrionSystemTest, WheelPerturbationAddsBoundedOffsetsUntilHalt)
+{
+  ASSERT_EQ(
+    init(urdf("<param name=\"perturbation_max_rad_s\">1.0</param>")),
+    CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_configure(lifecycle_state), CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_activate(lifecycle_state), CallbackReturn::SUCCESS);
+  auto node = rclcpp::Node::make_shared("perturbation_test_publisher");
+  auto safety = node->create_publisher<orion_msgs::msg::SafetyStatus>(
+    OrionSystem::kSafetyTopic, 10);
+  auto perturb = node->create_publisher<orion_msgs::msg::WheelPerturbation>(
+    OrionSystem::kPerturbationTopic, 10);
+  command("fl_joint", 1.0);
+  command("fr_joint", 1.0);
+  command("rl_joint", 1.0);
+  command("rr_joint", 1.0);
+
+  // No SafetyStatus yet: rejected.
+  for (int i = 0; i < 20; ++i) {
+    perturb->publish(perturbation(0.5, 5.0));
+    spin(10ms);
+  }
+  EXPECT_EQ(last_cmd().w_target_mrad_s[0], 1000);
+
+  auto applied = [&]() {
+    return last_cmd().w_target_mrad_s[0] == 1500;
+  };
+  // fl +0.5, fr -0.25 (direction -1 on the wire), rl 0, rr +1.0 (motor 2).
+  auto msg = perturbation(0.5, 5.0);
+  msg.offsets[1] = -0.25f;
+  msg.offsets[3] = 1.0f;
+  bool ok = false;
+  for (int i = 0; i < 100 && !ok; ++i) {
+    publish_safety(*safety, SafetyStatus::STATE_NOMINAL);
+    perturb->publish(msg);
+    spin(10ms);
+    ok = applied();
+  }
+  ASSERT_TRUE(ok) << "perturbation not applied";
+  const auto cmd = last_cmd();
+  EXPECT_EQ(cmd.w_target_mrad_s[1], -750);
+  EXPECT_EQ(cmd.w_target_mrad_s[3], 1000);
+  EXPECT_EQ(cmd.w_target_mrad_s[2], 2000);
+
+  // Above the bound: rejected, the active one stays.
+  for (int i = 0; i < 20; ++i) {
+    publish_safety(*safety, SafetyStatus::STATE_NOMINAL);
+    perturb->publish(perturbation(1.5, 5.0));
+    spin(10ms);
+  }
+  EXPECT_TRUE(applied());
+
+  // HALT cancels it, and it does not come back when the state recovers.
+  publish_safety_until(*safety, SafetyStatus::STATE_HALT);
+  for (int i = 0; i < 20; ++i) {
+    publish_safety(*safety, SafetyStatus::STATE_NOMINAL);
+    spin(10ms);
+  }
+  EXPECT_EQ(last_cmd().w_target_mrad_s[0], 1000);
+}
+
+TEST_F(OrionSystemTest, WheelPerturbationStopsWhenSafetyStatusGoesStale)
+{
+  ASSERT_EQ(
+    init(urdf("<param name=\"perturbation_max_rad_s\">1.0</param>")),
+    CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_configure(lifecycle_state), CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_activate(lifecycle_state), CallbackReturn::SUCCESS);
+  auto node = rclcpp::Node::make_shared("perturbation_test_publisher");
+  auto safety = node->create_publisher<orion_msgs::msg::SafetyStatus>(
+    OrionSystem::kSafetyTopic, 10);
+  auto perturb = node->create_publisher<orion_msgs::msg::WheelPerturbation>(
+    OrionSystem::kPerturbationTopic, 10);
+  bool ok = false;
+  for (int i = 0; i < 100 && !ok; ++i) {
+    publish_safety(*safety, SafetyStatus::STATE_NOMINAL);
+    perturb->publish(perturbation(0.5, 30.0));
+    spin(10ms);
+    ok = last_cmd().w_target_mrad_s[0] == 500;
+  }
+  ASSERT_TRUE(ok);
+  std::this_thread::sleep_for(600ms);  // > safety_timeout_s 0.5 s without SafetyStatus
+  EXPECT_EQ(last_cmd().w_target_mrad_s[0], 0);
 }

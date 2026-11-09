@@ -88,6 +88,8 @@ DriveConfig parse_drive_config(const std::map<std::string, std::string> & params
   c.state_timeout_s = get_double(params, "state_timeout_s", 0.1, 0.02, 1.0);
   c.health_rate_hz = get_double(params, "health_rate_hz", 10.0, 0.1, 100.0);
   c.brake_on_idle = get_bool(params, "brake_on_idle", false);
+  c.perturbation_max_rad_s = get_double(params, "perturbation_max_rad_s", 0.0, 0.0, 10.0);
+  c.safety_timeout_s = get_double(params, "safety_timeout_s", 0.5, 0.05, 5.0);
   return c;
 }
 

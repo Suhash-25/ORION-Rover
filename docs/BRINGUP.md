@@ -56,8 +56,11 @@ ros2 topic pub --once /orion/estop std_msgs/msg/Bool "{data: true}"
 ```
 
 Pass: wheels stop within 0.5 s while teleop is still publishing; SafetyStatus.state = 3.
-Clear: `ros2 topic pub --once /orion/estop std_msgs/msg/Bool "{data: false}"` then
-`ros2 service call /orion/estop_reset orion_msgs/srv/EstopReset "{confirm: 'CLEAR ESTOP'}"`.
+Clear: `ros2 topic pub --once /orion/estop std_msgs/msg/Bool "{data: false}"`. Pass: RoverHealth
+`fw_fault_flags` still has ESTOP_LATCHED (16): the firmware stays latched until the reset.
+Then `ros2 service call /orion/estop_reset orion_msgs/srv/EstopReset "{confirm: 'CLEAR ESTOP'}"`.
+Pass: ESTOP_LATCHED clears within 0.1 s and the orion_hardware log says "orion_safety accepted
+the e-stop reset: ESTOP_CLEAR sent to firmware".
 
 ## 2. Wheel direction
 

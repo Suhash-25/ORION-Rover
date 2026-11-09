@@ -124,17 +124,23 @@ orion_experiments must check that the topic is alive before starting a trial.
     and low confidence: the rule stays disabled, as before (an IMU-only speed must not declare
     the rover stuck). FIX-B changes the confidence formula itself (Kalman std instead of the
     wheel disagreement); this rule does not depend on which formula is used.
-14. **`/orion/estop` false sends ESTOP_CLEAR to the firmware at once** (council m1). In
-    `orion_hardware/src/orion_system.cpp` (`on_estop`), true sends the ESTOP frame and repeats
-    it every cycle; false sends ESTOP_CLEAR immediately, before anyone calls
-    `/orion/estop_reset`. So the firmware is ready to drive again before the host-side reset.
-    It is still safe because nothing commands the wheels until the reset: orion_safety keeps
-    its ESTOP latched and publishes zero twists at priority 255 on `/cmd_vel/estop` at 50 Hz,
-    which beats every other twist_mux input, so the drive controller sends zero wheel targets.
-    The residual risk is a dead orion_safety: then releasing the e-stop topic lets the
-    highest remaining source (teleop, policy, Nav2) drive at once, without the reset. Gating
-    ESTOP_CLEAR on the reset would need a service or topic from orion_safety to
-    orion_hardware; not done, recorded here.
+14. **The firmware e-stop is cleared only after the reset** (council m1, closed by FINAL).
+    orion_hardware sends ESTOP on `/orion/estop` true and repeats it every cycle. It sends
+    ESTOP_CLEAR only when `/orion/estop` is false **and** `/orion/safety_status` has shown
+    STATE_ESTOP after the latch and then left STATE_ESTOP within 0.5 s (`safety_timeout_s`) of
+    the last ESTOP status. orion_safety's ESTOP is latched until `/orion/estop_reset` succeeds
+    (`confirm == "CLEAR ESTOP"`, refused while `/orion/estop` is true), so leaving it is the
+    reset. The 0.5 s continuity matters: a restarted orion_safety has forgotten the e-stop
+    (the topic is not latched) and reports NOMINAL without a reset; at 50 Hz a gap > 0.5 s
+    means it died, and then the old ESTOP status no longer counts. The signal is the existing
+    SafetyStatus: no new interface. Without a running orion_safety the firmware stays latched
+    (fail-safe); a status that never showed ESTOP is not evidence of a reset. Rejected: a
+    dedicated "reset accepted" topic (a second contract for the same fact). Before this,
+    releasing the topic sent ESTOP_CLEAR at once and only the priority-255 zeros of a live
+    orion_safety held the rover. Tests:
+    `orion_hardware/test/test_safety_gates.cpp`, `test_orion_system.cpp`, and
+    `test_integration.py` with the real orion_safety node and the fake firmware (topic
+    release alone and a wrong phrase keep the firmware latched; the reset clears it).
 15. **twist_mux e-stop lock timeout 0.0 is fail-open for a dead e-stop publisher** (council
     m2). With timeout 0.0 the lock acts on the last `/orion/estop` value forever, so a
     publisher that dies (or never starts) leaves every input unmasked and nothing notices.
@@ -156,7 +162,9 @@ What the safety chain does **not** cover. Each item is deliberate or waiting for
 | --- | --- | --- | --- |
 | Nav2 (`/cmd_vel/nav`) and teleop (`/cmd_vel/teleop`) are not gated by SafetyStatus (council m3) | they ignore LIMITED speed caps and stuck flags; only orion_policy scales its commands to `max_linear_speed` / `max_angular_speed` | HALT masks Nav2 (priority 50 < 150); teleop overrides HALT on purpose (200 > 150, see States); ESTOP masks both; the firmware current clamp and watchdog still apply | a twist filter between twist_mux and the controller that applies SafetyStatus limits to every source |
 | Dead e-stop publisher (m2) | pressing a software e-stop does nothing; the twist_mux lock stays open | physical e-stop; operator watches SafetyStatus | repeating e-stop driver, then lock timeout 0.5 s (decision 15) |
-| ESTOP_CLEAR before the reset (m1) | firmware re-enabled before the host-side reset | priority-255 zeros from orion_safety until EstopReset (decision 14) | gate ESTOP_CLEAR on the reset |
+| ~~ESTOP_CLEAR before the reset (m1)~~ **closed** | - | ESTOP_CLEAR is sent only after orion_safety accepted EstopReset (decision 14) | - |
+| orion_safety restarted while the e-stop is held (m1 residual) | the restarted node does not know the e-stop and no longer publishes priority-255 zeros | the firmware stays latched (the status gap voids the reset evidence, decision 14): press the e-stop again, then reset; twist_mux lock while `/orion/estop` stays true | repeating e-stop driver (decision 15) |
+| WheelPerturbation hook (Round 7) | adds up to `perturbation_max_rad_s` per wheel to the commanded velocity | off by default (bound 0); rejected unless SafetyStatus is fresh and NOMINAL / LIMITED; cancelled by HALT, ESTOP, `/orion/estop`, a SafetyStatus older than 0.5 s and deactivation | - |
 | Optional inputs silently absent | no geofence without a pose, no stuck rule without TerrainState | orion_experiments refuses to start a trial without EXTERNAL body speed for 2 s (council M6) | - |
 | I_cont / I_peak are GUESSES | a current HALT (trial outcome SAFETY, counted as a failure in the kill test) may fire too early or too late | values in safety.yaml flagged GUESS; BRINGUP step 4 | measured motor and driver limits |
 

@@ -34,9 +34,11 @@
   <test_depend>joint_state_broadcaster</test_depend>
   <test_depend>orion_control</test_depend>
   <test_depend>orion_description</test_depend>
+  <test_depend>orion_safety</test_depend>
   <test_depend>python3-yaml</test_depend>
   <test_depend>rclpy</test_depend>
   <test_depend>robot_state_publisher</test_depend>
+  <test_depend>ros2topic</test_depend>
   <test_depend>sensor_msgs</test_depend>
   <test_depend>socat</test_depend>
   <test_depend>xacro</test_depend>
