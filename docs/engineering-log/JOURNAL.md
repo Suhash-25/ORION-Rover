@@ -89,3 +89,13 @@ official ROS apt servers are blocked there. CI on GitHub uses the official apt p
 - Mistake caught (M-008): ament_python tests did not run at all ("NO TESTS RAN") because this
   setuptools ignores `tests_require`. Fixed with `extras_require={'test': ['pytest']}` and told
   the three agents writing Python packages.
+
+### 11:57 Request (paper thread): full research paper as Markdown in the repo
+- Committed docs/RESEARCH.md (about 16k words: agent briefing, full paper, differences from
+  SPEC). It resolves a real inconsistency: the kill test size. Adopted a two-stage design (D-008)
+  and updated SPEC.md §8 and RESEARCH.md Part 2B to match.
+
+### 11:51 Coordinator FYI: Round 7 candidate (critical slowing down) not adopted
+- Keep interfaces able to support it: wheel encoder and IMU logging at >= 100 Hz and a
+  perturbation-injection hook in the motor command path. The detector itself is not built
+  unless the user approves.

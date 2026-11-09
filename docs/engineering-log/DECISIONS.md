@@ -37,3 +37,11 @@ camera + AprilTag (~5 mm, >= 20 Hz), (b) lidar odometry only (2-5 cm/s), (c) mot
 the sandbox plus a tag on the rover, both in the same image, so camera placement errors
 cancel. Implausible detections (> 1 m/s jumps, > 0.6 rad tilt) are rejected. Lidar odometry
 stays as the onboard fallback.
+
+## D-008 Kill test is two-stage: 4 × 20 pilot, then 40 in cells C and D (2026-11-09)
+The paper thread showed that 20 runs per cell has about 49% power for trap rates of 10% vs
+40%, so a NO-GO after 20 runs would be weak evidence and could kill a true effect. The council
+spec had 4 × 20. Options: (a) keep 4 × 20, (b) 40 in every cell (160 runs, too slow for Phase
+0), (c) two-stage. Chose (c): stage 1 pilot 4 × 20 with early GO only at α = 0.01; stage 2
+extends C and D to 40 each and tests at α = 0.04; NO-GO only after stage 2. Paper and SPEC now
+agree. orion_experiments analysis must implement the two looks.

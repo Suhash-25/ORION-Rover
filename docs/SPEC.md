@@ -152,10 +152,15 @@ Randomised order. Metrics: success, time-to-goal, entrapped, time-to-entrapment 
 critic calibration. Metadata: git SHA, firmware hash, ONNX sha256, obs_spec_hash, cell,
 ballast, cone depths, operator, timestamp, bag path.
 
-Phase-0 kill test (pre-registered): B0 tuned on light-packed; 20 trials in each of 4 cells.
-GO if for at least one loose cell the failure rate rises >= 0.25 over light-packed with
-one-sided Fisher exact p < 0.05, or median effective speed drops >= 30 % with Mann-Whitney
-p < 0.05. Otherwise pivot to self-rescue. Main study: 4 cells x 4 controllers (B0, B2,
+Phase-0 kill test (pre-registered, two-stage; D-008): B0 tuned on light-packed (cell C).
+Stage 1 (pilot): 20 trials in each of the 4 cells. Early GO if for at least one loose cell the
+failure rate rises >= 0.25 over light-packed with one-sided Fisher exact p < 0.01, or median
+effective speed drops >= 30 % with Mann-Whitney p < 0.01. Stage 2 (if no early GO): extend
+light-packed (C) and light-loose (D) to 40 trials each and test C vs D once more at p < 0.04
+(same effect-size rules). GO if stage 2 passes; otherwise NO-GO and pivot to self-rescue.
+The 0.01 / 0.04 split keeps the overall false-GO rate at or below 0.05 across the two looks.
+Power for trap rates 10 % vs 40 %: about 0.49 at 20 per cell, 0.85 at 40 (paper, Sample Size).
+Main study: 4 cells x 4 controllers (B0, B2,
 student, student + critic) x 25 = 400 trials, Holm-corrected Fisher on failure rate.
 
 ## 9. Open decisions for the user
