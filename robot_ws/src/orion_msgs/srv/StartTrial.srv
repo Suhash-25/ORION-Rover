@@ -1,0 +1,8 @@
+string trial_id              # unique, e.g. 2026-11-09_loose-heavy_B0_007
+string cell                  # light-packed | light-loose | heavy-packed | heavy-loose | sim
+string controller            # B0 | B2 | student | student_critic
+float32 duration_s           # hard timeout, normally 60
+---
+bool success
+string message
+string bag_path

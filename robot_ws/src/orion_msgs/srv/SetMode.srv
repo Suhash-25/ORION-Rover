@@ -1,0 +1,5 @@
+# Request a controller mode (PolicyStatus.MODE_*).
+uint8 mode
+---
+bool success
+string message

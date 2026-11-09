@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orion_learning"
+version = "0.1.0"
+description = "ORION meta-RL: soil simulator, training, export. No ROS dependency."
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+train = ["torch>=2.1", "gymnasium>=0.29", "onnx>=1.15", "onnxruntime>=1.17", "pyyaml>=6", "scipy>=1.10"]
+bags = ["rosbags>=0.9"]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["orion_learning*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

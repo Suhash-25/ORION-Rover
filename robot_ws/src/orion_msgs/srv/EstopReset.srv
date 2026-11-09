@@ -1,0 +1,5 @@
+# Clearing a latched e-stop needs a deliberate request with this exact phrase.
+string confirm               # must equal "CLEAR ESTOP"
+---
+bool success
+string message
