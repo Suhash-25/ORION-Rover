@@ -141,8 +141,11 @@ class SafetyNode(Node):
     def _on_reset(self, request, response):
         response.success, response.message = self.monitor.request_reset(
             self._now(), request.confirm)
-        log = self.get_logger().info if response.success else self.get_logger().warn
-        log(f'/orion/estop_reset: {response.message}')
+        # rclpy forbids changing the severity of one logging call site, hence two calls.
+        if response.success:
+            self.get_logger().info(f'/orion/estop_reset: {response.message}')
+        else:
+            self.get_logger().warn(f'/orion/estop_reset: {response.message}')
         return response
 
     def tick(self):
@@ -169,8 +172,11 @@ class SafetyNode(Node):
                 self.estop_pub.publish(zero)
 
         if decision.state != self._last_state:
-            log = self.get_logger().info if decision.state <= 1 else self.get_logger().warn
-            log(f'state {STATE_NAMES[decision.state]}: {decision.reason or "ok"}')
+            text = f'state {STATE_NAMES[decision.state]}: {decision.reason or "ok"}'
+            if decision.stops_robot:
+                self.get_logger().warn(text)
+            else:
+                self.get_logger().info(text)
             self._last_state = decision.state
 
 

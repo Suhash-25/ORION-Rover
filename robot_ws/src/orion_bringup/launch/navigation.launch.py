@@ -53,6 +53,9 @@ def generate_launch_description():
 
     ###########################################################
     # Controller Server
+    # Nav2 commands (TwistStamped, enable_stamped_cmd_vel) enter twist_mux at the lowest
+    # priority (50) on /cmd_vel/nav, never the drive controller directly: safety, policy
+    # and teleop must be able to override it (docs/INTERFACES.md).
     ###########################################################
 
     controller_server = Node(
@@ -61,7 +64,7 @@ def generate_launch_description():
         name="controller_server",
         output="screen",
         parameters=[nav2_params],
-        remappings=[("cmd_vel", "/diff_drive_controller/cmd_vel")],
+        remappings=[("cmd_vel", "/cmd_vel/nav")],
     )
 
     ###########################################################
@@ -74,7 +77,7 @@ def generate_launch_description():
         name="behavior_server",
         output="screen",
         parameters=[nav2_params],
-        remappings=[("cmd_vel", "/diff_drive_controller/cmd_vel")],
+        remappings=[("cmd_vel", "/cmd_vel/nav")],
     )
 
     ###########################################################

@@ -25,7 +25,8 @@ from tf2_ros import TransformListener
 sys.path.insert(0, os.path.dirname(__file__))
 from sim_helpers import include_bringup, kill_leftover_gazebo, Probe  # noqa: E402, I100
 
-CMD_TOPIC = '/diff_drive_controller/cmd_vel'
+# Through twist_mux like every command source (teleop slot, priority 200).
+CMD_TOPIC = '/cmd_vel/teleop'
 ODOM_TOPIC = '/diff_drive_controller/odom'
 
 

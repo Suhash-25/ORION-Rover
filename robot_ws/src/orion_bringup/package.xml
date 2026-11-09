@@ -33,6 +33,9 @@
 
   <exec_depend>orion_description</exec_depend>
   <exec_depend>orion_control</exec_depend>
+  <exec_depend>orion_safety</exec_depend>
+  <exec_depend>twist_mux</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
 
