@@ -19,13 +19,14 @@ from operator import itemgetter
 from typing import Iterable, Mapping, Optional, Sequence
 
 import numpy as np
-from orion_learning.obs_spec import side_mean, WHEEL_ORDER, WHEEL_RADIUS_M, wheel_slip
+from orion_learning import estimator as shared
+from orion_learning.obs_spec import side_mean, WHEEL_ORDER, wheel_slip
 
 from orion_terrain.effort_model import EffortModel, EffortSource
 from orion_terrain.filters import LowPass, WheelAccel
 from orion_terrain.imu import body_acceleration, roll_pitch
 from orion_terrain.params import DEFAULT_JOINT_NAMES, DEFAULT_TOPICS, TerrainParams
-from orion_terrain.speed import BodySpeedKalman, confidence, PoseDifferentiator, SpeedSource
+from orion_terrain.speed import BodySpeedKalman, PoseDifferentiator, SpeedSource
 
 
 @dataclass
@@ -71,6 +72,10 @@ class TerrainEstimator:
     effort is CURRENT or DUTY_ESTIMATE according to RoverHealth.current_sensed, and the
     sinkage proxy is only published with a calibrated model of that same source; otherwise
     sinkage_proxy = 0 and effort_source = NONE, with a warning logged once per reason.
+
+    The maths (Kalman filter, confidence, low-pass, effort residual and its informative-window
+    hold, sinkage proxy) is orion_learning.estimator, the code the learning env trains with;
+    this class only routes messages and keeps the sample times.
     """
 
     def __init__(self, params: Optional[TerrainParams] = None,
@@ -86,19 +91,17 @@ class TerrainEstimator:
         self._log = logger or logging.getLogger('orion_terrain')
         self._warned: set = set()
 
-        self.kf = BodySpeedKalman(self.p.q_accel_mps2, 0.0, self.p.initial_speed_std_mps)
+        self.kf = BodySpeedKalman(shared.KF_ACCEL_SIGMA, 0.0, self.p.initial_speed_std_mps)
         self._pose_diff = PoseDifferentiator(self.p.sg_window, self.p.external_timeout_s)
         self._wheel_accel = WheelAccel(self.p.wheel_accel_tau_s)
-        self._slip_lp = LowPass(self.p.slip_tau_s)
-        self._residual_lp = LowPass(self.p.slip_tau_s)
+        self._slip_lp = LowPass(shared.LOWPASS_TAU_S)
+        self._residual_lp = LowPass(shared.LOWPASS_TAU_S)
 
         self._ax = 0.0                     # gravity-free body a_x, m/s^2 (zero-order hold)
         self._yaw_rate = 0.0               # rad/s, gyro z
         self._pitch = 0.0                  # rad, nose down positive
-        self._w: Optional[np.ndarray] = None
-        self._v_odom: Optional[float] = None
         self._current_sensed: Optional[bool] = None
-        self._t_imu = self._t_joint = self._t_odom = None
+        self._t_imu = None
         self._t_external = self._t_lidar = self._t_fix = None
 
     # --- helpers -------------------------------------------------------------------------
@@ -154,8 +157,6 @@ class TerrainEstimator:
         elif role == 'joint_states':
             self.on_joint_state(t, list(msg_get(msg, 'name')), msg_get(msg, 'velocity'),
                                 msg_get(msg, 'effort'))
-        elif role == 'wheel_odom':
-            self.on_wheel_odom(t, float(msg_get(msg, 'twist.twist.linear.x')))
         elif role == 'ground_truth_pose':
             self.on_ground_truth_pose(t, msg_vec3(msg, 'pose.position'),
                                       msg_quat(msg, 'pose.orientation'))
@@ -188,7 +189,6 @@ class TerrainEstimator:
             return
         w = np.asarray(velocity, dtype=np.float64)[idx]
         self._advance(t)
-        self._w, self._t_joint = w, t
         dwdt = self._wheel_accel.update(t, w)
         self._slip_lp.update(t, wheel_slip(w, self.kf.v, self._yaw_rate))
         if self.model is None or not self.model.calibrated:
@@ -197,12 +197,8 @@ class TerrainEstimator:
             self.warn_once('/joint_states carries no effort: no effort residual')
             return
         e = np.asarray(effort, dtype=np.float64)[idx]
-        self._residual_lp.update(t, self.model.residual(w, dwdt, self._pitch, e),
+        self._residual_lp.update(t, self.model.residual(e, w, dwdt, self._pitch),
                                  mask=self.model.informative(w, self._yaw_rate))
-
-    def on_wheel_odom(self, t: float, v: float) -> None:
-        """diff_drive_controller body speed (m/s): ONLY used in the confidence term."""
-        self._v_odom, self._t_odom = v, t
 
     def on_ground_truth_pose(self, t: float, position, quat) -> None:
         """Overhead-camera pose (world frame, m): EXTERNAL fix, highest priority."""
@@ -211,7 +207,7 @@ class TerrainEstimator:
             return
         t_centre, v = fix
         self._advance(t)
-        self.kf.update(v, self.p.r_external_mps, t_meas=t_centre)
+        self.kf.update(v, shared.FIX_SIGMA_EXTERNAL, t_meas=t_centre)
         self._t_external = self._t_fix = t
 
     def on_lidar_odom(self, t: float, v: float) -> None:
@@ -220,7 +216,7 @@ class TerrainEstimator:
         if self.speed_source(t) == SpeedSource.EXTERNAL:
             return
         self._advance(t)
-        self.kf.update(v, self.p.r_lidar_mps, t_meas=t)
+        self.kf.update(v, shared.FIX_SIGMA_LIDAR, t_meas=t)
         self._t_fix = t
 
     def on_rover_health(self, t: float, current_sensed: bool) -> None:
@@ -230,13 +226,7 @@ class TerrainEstimator:
     def estimate(self, t: float) -> TerrainEstimate:
         """State at time t (s); call at the publish rate."""
         self._advance(t)
-        t_since = t - self._t_fix if self._t_fix is not None else math.inf
-        if self._fresh(self._t_odom, t, self.p.wheel_odom_timeout_s):
-            v_wheel = self._v_odom
-        elif self._fresh(self._t_joint, t, self.p.wheel_odom_timeout_s):
-            v_wheel = WHEEL_RADIUS_M * float(np.mean(self._w))   # what diff_drive computes
-        else:
-            v_wheel = None
+        t_since = max(0.0, t - self._t_fix) if self._t_fix is not None else math.inf
         slip = (self._slip_lp.value.copy() if self._slip_lp.value is not None
                 else np.zeros(len(WHEEL_ORDER)))
         source = self.effort_source()
@@ -250,8 +240,7 @@ class TerrainEstimator:
             sinkage_proxy=sinkage, body_speed=self.kf.v, body_speed_std=self.kf.std,
             body_yaw_rate=self._yaw_rate, body_speed_source=self.speed_source(t),
             effort_source=source,
-            confidence=confidence(t_since, v_wheel, self.kf.v, self.p.confidence_tau_s,
-                                  self.p.confidence_disagree_mps),
+            confidence=float(shared.speed_confidence(t_since, self.kf.std)),
             time_since_fix=t_since)
 
 

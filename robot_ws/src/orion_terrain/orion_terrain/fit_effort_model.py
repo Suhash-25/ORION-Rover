@@ -10,7 +10,8 @@ with the light rover: varied speeds both directions, accelerations, turns and, i
 sandbox allows, some slope (docs/SPEC.md section 4).
 
 I_ref = I_stall - I_free. I_stall comes from the stall test (wheel blocked, full command);
-I_free defaults to the fitted flat-ground effort at --free-speed.
+I_free defaults to the fitted flat-ground effort at --free-speed. The fit and its sample window
+(|w| >= 0.5 rad/s, |yaw rate| <= 0.2 rad/s) are orion_learning.estimator's, as in the env.
 """
 
 from __future__ import annotations
@@ -24,10 +25,10 @@ import sys
 from typing import Iterable, Iterator, Optional, Sequence
 
 import numpy as np
+from orion_learning import estimator as shared
 from orion_learning.obs_spec import WHEEL_ORDER, WHEEL_RADIUS_M
 
-from orion_terrain.effort_model import (EFFORT_UNITS, EffortModel, EffortSource,
-                                        fit_coefficients)
+from orion_terrain.effort_model import EFFORT_UNITS, EffortModel, EffortSource
 from orion_terrain.estimator import msg_get, msg_quat, stamp_seconds
 from orion_terrain.filters import WheelAccel
 from orion_terrain.imu import roll_pitch
@@ -116,8 +117,7 @@ def git_sha(cwd: Optional[str] = None) -> str:
 
 def fit_model(samples: dict, *, sim: bool, effort_source: Optional[EffortSource],
               i_ref: Optional[float], i_stall: Optional[float], i_free: Optional[float],
-              free_speed_mps: float, deadband_radps: float, max_yaw_rate_radps: float,
-              source: str, sha: str) -> EffortModel:
+              free_speed_mps: float, source: str, sha: str) -> EffortModel:
     """Least-squares fit plus I_ref and provenance; raises ValueError on unusable input."""
     if sim:
         effort_source = EffortSource.SIM_TORQUE
@@ -127,8 +127,8 @@ def fit_model(samples: dict, *, sim: bool, effort_source: Optional[EffortSource]
             raise ValueError('cannot tell the effort source: pass --effort-source '
                              f'(RoverHealth.current_sensed values in the bag: {sorted(seen)})')
         effort_source = EffortSource.CURRENT if seen.pop() else EffortSource.DUTY_ESTIMATE
-    fit = fit_coefficients(samples['w'], samples['dwdt'], samples['pitch'], samples['effort'],
-                           samples['yaw_rate'], deadband_radps, max_yaw_rate_radps)
+    fit = shared.fit_effort_model(samples['w'], samples['dwdt'], samples['pitch'],
+                                  samples['effort'], samples['yaw_rate'])
     coefs = fit.coefficients
     if i_ref is None:
         if i_stall is None:
@@ -139,8 +139,7 @@ def fit_model(samples: dict, *, sim: bool, effort_source: Optional[EffortSource]
         i_ref = i_stall - i_free
     return EffortModel(
         coefficients=coefs, i_ref=float(i_ref), effort_unit=EFFORT_UNITS[effort_source],
-        effort_source=effort_source, calibrated=True, deadband_radps=deadband_radps,
-        max_yaw_rate_radps=max_yaw_rate_radps, slope_identified=fit.slope_identified,
+        effort_source=effort_source, calibrated=True, slope_identified=fit.slope_identified,
         git_sha=sha, date=datetime.now(timezone.utc).isoformat(timespec='seconds'),
         source=source, r2=[float(r) for r in fit.r2],
         n_samples=[int(n) for n in fit.n_samples])
@@ -159,9 +158,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument('--i-stall', type=float, help='stall-test effort; I_ref = I_stall - I_free')
     ap.add_argument('--i-free', type=float, help='free-running effort (default: fitted)')
     ap.add_argument('--free-speed', type=float, default=0.3, help='m/s for the fitted I_free')
-    ap.add_argument('--deadband', type=float, default=0.5, help='rad/s; slower samples dropped')
-    ap.add_argument('--max-yaw-rate', type=float, default=0.2,
-                    help='rad/s; samples turning faster are dropped (scrub is not modelled)')
     ap.add_argument('--joint-names', nargs=4, default=list(DEFAULT_JOINT_NAMES),
                     metavar=WHEEL_ORDER)
     ap.add_argument('--git-sha', help='override the detected git SHA')
@@ -175,8 +171,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             samples, sim=args.sim,
             effort_source=EffortSource[args.effort_source] if args.effort_source else None,
             i_ref=args.i_ref, i_stall=args.i_stall, i_free=args.i_free,
-            free_speed_mps=args.free_speed, deadband_radps=args.deadband,
-            max_yaw_rate_radps=args.max_yaw_rate,
+            free_speed_mps=args.free_speed,
             source=f'{os.path.abspath(args.bag_dir)} ({n} joint_states samples)',
             sha=args.git_sha or git_sha())
     except ValueError as e:

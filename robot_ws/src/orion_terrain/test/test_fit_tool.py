@@ -88,7 +88,7 @@ def test_effort_source_from_rover_health_and_sim():
             'name': list(DEFAULT_JOINT_NAMES), 'velocity': w[k], 'effort': effort[k]}))
     s = extract_samples(msgs)
     kw = {'i_ref': 3.0, 'i_stall': None, 'i_free': None, 'free_speed_mps': 0.3,
-          'deadband_radps': 0.5, 'max_yaw_rate_radps': 0.2, 'source': 'test', 'sha': 'x'}
+          'source': 'test', 'sha': 'x'}
     assert fit_model(s, sim=False, effort_source=None, **kw).effort_source == \
         EffortSource.DUTY_ESTIMATE
     sim = fit_model(s, sim=True, effort_source=None, **kw)

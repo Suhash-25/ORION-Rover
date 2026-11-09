@@ -1,11 +1,16 @@
-"""Effort model: fit, residual sign, sinkage proxy, persistence, and the effort-source gate."""
+"""
+Effort model: shared maths, residual hold, sinkage proxy, persistence, effort-source gate.
+
+The fit itself is orion_learning.estimator.fit_effort_model (tested in learning/tests).
+"""
 
 import os
 
 from conftest import RecordingLogger
 from effort_data import drive, make_model, signed_effort, TRUE_COEFS
 import numpy as np
-from orion_terrain.effort_model import EffortModel, EffortSource, fit_coefficients
+from orion_learning import estimator as shared
+from orion_terrain.effort_model import EffortModel, EffortSource
 from orion_terrain.estimator import TerrainEstimator
 from orion_terrain.params import DEFAULT_JOINT_NAMES
 import pytest
@@ -14,38 +19,25 @@ CONFIG = os.path.join(os.path.dirname(__file__), '..', 'config')
 LEVEL = (0.0, 0.0, 0.0, 1.0)
 
 
-def test_fit_recovers_known_coefficients():
-    _, w, dwdt, pitch = drive()
+def test_runtime_model_is_the_shared_model():
+    """Same residual, mask and proxy as orion_learning.estimator, bit for bit (council M5)."""
+    _, w, dwdt, pitch = drive(5.0)
     rng = np.random.default_rng(3)
-    effort = signed_effort(TRUE_COEFS, w, dwdt, pitch) + rng.normal(0, 0.01, w.shape)
-    fit = fit_coefficients(w, dwdt, pitch, effort, np.zeros(len(w)), 0.5, 0.2)
-    assert np.allclose(fit.coefficients, TRUE_COEFS, rtol=0.03, atol=0.005)
-    assert np.all(fit.r2 > 0.99)
-    assert np.all(fit.n_samples > 0.8 * len(w)) and fit.slope_identified
+    effort = signed_effort(TRUE_COEFS, w, dwdt, pitch) + rng.normal(0, 0.3, w.shape)
+    m = make_model()
+    ref = shared.EffortModel(TRUE_COEFS, ref=5.0)
+    for k in range(0, len(w), 37):
+        r = m.residual(effort[k], w[k], dwdt[k], pitch[k])
+        assert np.array_equal(r, ref.residual(effort[k], w[k], dwdt[k], pitch[k]))
+        assert m.sinkage_proxy(r) == float(ref.proxy(r))
+        assert np.array_equal(m.informative(w[k], 0.1), shared.informative_mask(w[k], 0.1))
 
 
-def test_fit_ignores_turning_samples():
+def test_fit_tool_uses_the_shared_fit():
     _, w, dwdt, pitch = drive()
-    yaw = np.where(np.arange(len(w)) % 3 == 0, 0.8, 0.0)       # a third of the time turning
-    effort = signed_effort(TRUE_COEFS, w, dwdt, pitch) + np.where(yaw > 0, 4.0, 0.0)[:, None]
-    fit = fit_coefficients(w, dwdt, pitch, effort, yaw, 0.5, 0.2)
-    assert np.allclose(fit.coefficients, TRUE_COEFS, rtol=0.03, atol=0.005)
-
-
-def test_fit_on_flat_ground_sets_slope_term_to_zero():
-    _, w, dwdt, _ = drive()
-    pitch = np.full(len(w), 0.001)
     effort = signed_effort(TRUE_COEFS, w, dwdt, pitch)
-    fit = fit_coefficients(w, dwdt, pitch, effort, np.zeros(len(w)), 0.5, 0.2)
-    assert not fit.slope_identified
-    assert np.all(fit.coefficients[:, 3] == 0.0)
-    assert np.allclose(fit.coefficients[:, :3], TRUE_COEFS[:, :3], rtol=0.03, atol=0.01)
-
-
-def test_fit_needs_informative_data():
-    w = np.full((100, 4), 0.1)
-    with pytest.raises(ValueError, match='only 0 samples'):
-        fit_coefficients(w, w * 0, np.zeros(100), w, np.zeros(100), 0.5, 0.2)
+    fit = shared.fit_effort_model(w, dwdt, pitch, effort, np.zeros(len(w)))
+    assert np.allclose(fit.coefficients, TRUE_COEFS, rtol=0.03, atol=0.005)
 
 
 def test_residual_is_zero_on_model_and_positive_for_extra_load_both_directions():
@@ -53,9 +45,9 @@ def test_residual_is_zero_on_model_and_positive_for_extra_load_both_directions()
     for w in (5.0, -5.0):
         wv = np.full(4, w)
         nominal = signed_effort(TRUE_COEFS, wv, np.zeros(4), 0.1)
-        assert np.allclose(m.residual(wv, np.zeros(4), 0.1, nominal), 0.0, atol=1e-12)
+        assert np.allclose(m.residual(nominal, wv, np.zeros(4), 0.1), 0.0, atol=1e-12)
         loaded = nominal + np.sign(w) * 1.0          # 1 A more, pushing against the sand
-        assert np.allclose(m.residual(wv, np.zeros(4), 0.1, loaded), 1.0)
+        assert np.allclose(m.residual(loaded, wv, np.zeros(4), 0.1), 1.0)
 
 
 def test_informative_window():
@@ -110,6 +102,15 @@ def test_yaml_round_trip(tmp_path):
     assert np.allclose(back.coefficients, m.coefficients)
     assert back.effort_source == EffortSource.CURRENT and back.git_sha == 'abc123'
     assert path.read_text().startswith('# test')
+
+
+def test_yaml_with_another_informative_window_is_refused(tmp_path):
+    """The window is part of what the policy was trained on; a model fitted on another is stale."""
+    d = make_model().to_dict()
+    assert (d['deadband_radps'], d['max_yaw_rate_radps']) == (0.5, 0.2)
+    d['deadband_radps'] = 0.3
+    with pytest.raises(ValueError, match='refit'):
+        EffortModel.from_dict(d)
 
 
 def test_yaml_missing_field_is_an_error(tmp_path):

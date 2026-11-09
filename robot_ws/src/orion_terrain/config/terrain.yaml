@@ -15,17 +15,16 @@ terrain_node:
     topics:
       joint_states: /joint_states
       imu: /imu/data
-      wheel_odom: /diff_drive_controller/odom
       ground_truth_pose: /orion/ground_truth_pose
       lidar_odom: /odom_rf2o
       rover_health: /orion/rover_health
       terrain_state: /orion/terrain_state
 
     rate_hz: 20.0
-    # Body-speed Kalman filter on v_x
-    q_accel_mps2: 0.1             # Q = q^2 dt
-    r_external_mps: 0.02          # overhead camera + AprilTag
-    r_lidar_mps: 0.05             # rf2o
+    # Body-speed Kalman filter on v_x. Its noise model (q 0.1 m/s^2, R 0.02 m/s camera,
+    # 0.05 m/s lidar), the confidence exp(-t_since_fix/3) * clip(1 - std/0.1, 0, 1), the 0.25 s
+    # low-pass and the effort-residual window are orion_learning.estimator constants (part of
+    # the obs_spec hash), not parameters.
     initial_speed_std_mps: 0.1
     gravity_mps2: 9.81
     sg_window: 5                  # Savitzky-Golay window on ground-truth poses
@@ -33,9 +32,9 @@ terrain_node:
     external_timeout_s: 0.25
     lidar_timeout_s: 0.5
     imu_timeout_s: 0.5
-    wheel_odom_timeout_s: 0.5
-    # c = exp(-t_since_fix / tau) * (1 - min(1, |v_wheel - v_x| / disagree))
-    confidence_tau_s: 3.0
-    confidence_disagree_mps: 0.5
-    slip_tau_s: 0.25              # low-pass on slip and effort residual
+    # Warn when a header stamp is > clock_skew_max_s off its receipt time for clock_skew_hold_s
+    # (external pose, IMU, joint states); at most once per clock_skew_warn_period_s per input.
+    clock_skew_max_s: 0.1
+    clock_skew_hold_s: 1.0
+    clock_skew_warn_period_s: 10.0
     wheel_accel_tau_s: 0.05       # low-pass on dw/dt (also used by fit_effort_model)
