@@ -1,0 +1,16 @@
+# Sandbox ground truth. MEASURE these on the real setup (docs/BRINGUP.md, "Overhead camera").
+orion_ground_truth:
+  ros__parameters:
+    camera_frame: overhead_camera
+    ref_tag_frame: "tag36h11:0"        # glued flat at the sandbox origin corner
+    rover_tag_frame: "tag36h11:1"      # on the rover's top plate, flat, x forward
+    ref_tag_in_sandbox:
+      xyz: [0.0, 0.0, 0.0]
+      quat_xyzw: [0.0, 0.0, 0.0, 1.0]
+    base_in_rover_tag:                 # base_link relative to the rover tag (GUESS: 0.30 m below)
+      xyz: [0.0, 0.0, -0.30]
+      quat_xyzw: [0.0, 0.0, 0.0, 1.0]
+    rate_hz: 30.0
+    max_speed_mps: 1.0
+    max_yaw_rate_rps: 4.0
+    max_tilt_rad: 0.6

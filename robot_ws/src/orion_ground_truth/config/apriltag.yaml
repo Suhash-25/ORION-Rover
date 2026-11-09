@@ -1,0 +1,16 @@
+# apriltag_ros (christianrauch) detector settings for 36h11 tags.
+apriltag:
+  ros__parameters:
+    image_transport: raw
+    family: 36h11
+    size: 0.10                 # m, black-square edge of the printed tags; MEASURE
+    max_hamming: 0
+    detector:
+      threads: 2
+      decimate: 1.0
+      blur: 0.0
+      refine: true
+    tag:
+      ids: [0, 1]
+      frames: ["tag36h11:0", "tag36h11:1"]
+      sizes: [0.10, 0.10]

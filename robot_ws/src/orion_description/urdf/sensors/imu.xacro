@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- IMU at the chassis centre. On the real rover, measure where the IMU
+       actually sits and update xyz/rpy (axes must match: x forward, z up). -->
+  <xacro:macro name="orion_imu" params="parent_link xyz:='0 0 0.05' rpy:='0 0 0'">
+
+    <link name="imu_link">
+      <inertial>
+        <mass value="0.02"/>
+        <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+      </inertial>
+    </link>
+
+    <joint name="imu_joint" type="fixed">
+      <parent link="${parent_link}"/>
+      <child link="imu_link"/>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+    </joint>
+
+    <gazebo reference="imu_link">
+      <sensor name="imu_sensor" type="imu">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <topic>/imu/data</topic>
+        <gz_frame_id>imu_link</gz_frame_id>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0</mean><stddev>0.002</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>0.002</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>0.002</stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </gazebo>
+
+  </xacro:macro>
+</robot>
