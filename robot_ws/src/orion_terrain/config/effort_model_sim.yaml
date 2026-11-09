@@ -1,0 +1,54 @@
+# UNCALIBRATED ZERO MODEL FOR GAZEBO (calibrated: false). terrain_node therefore publishes
+# effort_source NONE and sinkage_proxy 0 in simulation.
+# 
+# Why not a fit: Gazebo's velocity-commanded wheel joints report ~0 N.m effort during smooth
+# driving (even at 8 rad/s^2) and saturated +-6 N.m spikes during skid-steer scrub and contact
+# transients. A 196 s calibration bag (2026-11-09, fit_effort_model --sim) gave R^2 0.03-0.11
+# per wheel; with the fitted model the sinkage proxy on RIGID ground exceeded 0.1 for 12% of
+# the time (99th percentile 0.57). Rigid contact has no sinkage (D-003), so there is nothing
+# physical to calibrate. Sinkage is exercised in the learning env and on the rover instead.
+effort_model:
+  calibrated: false
+  model: d*I = c0 + c1*|w| + c2*d*dw/dt + c3*d*sin(pitch), d = sign(w); valid for
+    |w| >= deadband_radps and |yaw rate| <= max_yaw_rate_radps
+  coefficients:
+    FL:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    FR:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    RL:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    RR:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+  i_ref: 0.0
+  effort_unit: N.m
+  effort_source: SIM_TORQUE
+  deadband_radps: 0.5
+  max_yaw_rate_radps: 0.2
+  slope_identified: false
+  r2:
+    FL: .nan
+    FR: .nan
+    RL: .nan
+    RR: .nan
+  n_samples:
+    FL: 0
+    FR: 0
+    RL: 0
+    RR: 0
+  git_sha: 18414f81babe
+  date: '2026-11-09'
+  source: ZERO MODEL, not a fit. Gazebo bag of 196 s varied driving (test/sim/calibration_drive.py)
+    showed no fittable flat-ground effort, see header.
