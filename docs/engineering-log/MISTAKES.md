@@ -91,3 +91,14 @@ Format: what happened → root cause → lesson → guard now in place.
   rule could fire.
 - **Lesson:** every detection rule needs a test that it fires on a known-positive case under the
   configured noise. That test also exposed a float bug in the monitor's hold timer.
+
+## M-013 Sim passed in the sandbox but segfaulted in CI (bridge_node at shutdown)
+- **What:** sim-smoke failed on GitHub in PRs 2-4. ros_gz_bridge's `clock_bridge.launch` runs
+  `bridge_node`, which exits -11 on SIGINT with the apt Jazzy build. The RoboStack build in the
+  sandbox shut it down cleanly.
+- **Fix:** bridge /clock through the existing `parameter_bridge`. Committed on pr1-green and
+  merged up into pr2-safety and integration, with no force push. The strict segfault check
+  stays.
+- **Lesson:** the sandbox is not CI. The sandbox uses conda builds and CI uses apt builds of
+  the same packages, so teardown behaviour can differ. Treat the first GitHub run as the real
+  verification, and keep the segfault check rather than loosening it.
