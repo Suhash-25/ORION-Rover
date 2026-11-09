@@ -1,0 +1,6 @@
+# Python dependencies of orion_policy that have no rosdep key (CI: pip install -r this file).
+# orion_learning itself comes from this repo: pip install -e learning
+onnxruntime>=1.17
+# tests only: tiny ONNX models are exported with torch in test/onnx_fixture.py
+torch>=2.1
+onnx>=1.15
