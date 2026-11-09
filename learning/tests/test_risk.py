@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from orion_learning import env as E
-from orion_learning.risk import (branch_labels, brier, expected_calibration_error,
-                                 fit_temperature)
+from orion_learning.risk import (branch_labels, brier, entrapment_events,
+                                 expected_calibration_error, fit_temperature)
 
 
 def test_ece_and_brier():
@@ -23,6 +23,23 @@ def test_temperature_scaling_recovers_overconfidence():
     y = (rng.random(4000) < 1 / (1 + np.exp(-true_logit))).astype(float)
     T = fit_temperature(3.0 * true_logit, y)          # a 3x over-confident model
     assert T == pytest.approx(3.0, rel=0.15)
+
+
+def test_give_up_is_an_entrapment_dated_at_the_stuck_onset():
+    no = np.zeros(4, dtype=bool)
+    info = {'belly_out': np.array([True, False, False, False]),
+            'hard_stuck': np.array([False, True, False, False]),
+            'entrapment_time': np.array([7.0, 3.0, E.NO_TIME, E.NO_TIME]),
+            'stuck_onset': np.array([E.NO_TIME, 3.0, 4.0, E.NO_TIME]),
+            'episode_time': np.full(4, 30.0)}
+    event, date = entrapment_events(info, no)
+    assert event.tolist() == [True, True, False, False]
+    gave_up = np.array([False, False, True, True])
+    event, date = entrapment_events(info, gave_up)
+    assert event.tolist() == [True, True, True, True]
+    # belly-out when it happens, ENTRAPPED at its onset, give-up at the stuck onset or (no
+    # stuck episode) at the give-up itself.
+    assert date.tolist() == [7.0, 3.0, 4.0, 30.0]
 
 
 def _snapshot(cell, steps, action, cfg_mod=None):
@@ -99,3 +116,24 @@ def test_critic_collection_runs_the_gate_with_escapes_probes_and_retreats():
     assert modes['frac_explore'] > 0.3
     for m in ('frac_probe', 'frac_retreat', 'frac_escape'):
         assert modes[m] > 0.02, modes
+
+
+def test_evaluate_counts_a_give_up_as_entrapped(monkeypatch):
+    """The sim's trial outcome matches the rover's trial runner (SPEC section 8)."""
+    from orion_learning import evaluate
+
+    class GivesUpAtOneSecond:
+        def __init__(self, n):
+            self.gave_up = np.zeros(n, dtype=bool)
+            self.k = 0
+
+        def act(self, obs, info):
+            self.k += 1
+            self.gave_up[0] |= self.k >= 20           # rover 0 gives up, rover 1 drives on
+            return np.zeros((len(obs), 2), np.float32)
+
+    monkeypatch.setattr(evaluate, 'make_controller', lambda name, n, run: GivesUpAtOneSecond(n))
+    cfg = replace(E.cell_config('light-packed'), episode_s=3.0)
+    rows = evaluate.run_trials('B0', 'light-packed', 9.81, trials=2, seed=0, config=cfg)
+    assert [r['outcome'] for r in rows] == ['gave_up', 'timeout']
+    assert [r['entrapped'] for r in rows] == [1, 0]

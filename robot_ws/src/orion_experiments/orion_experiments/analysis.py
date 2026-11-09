@@ -16,12 +16,17 @@ Definitions (fixed here so the analysis is pre-registered, not chosen after the 
   /orion/ground_truth_pose (fallback /odom_rf2o; never wheel odometry, SPEC F4).
 - effective speed: progress / time-to-goal for a success, progress / trial duration (60 s)
   otherwise, so a rover that stops early is not rewarded for stopping.
-- time-to-entrapment: elapsed time to the hard-stuck HALT for ENTRAPPED, else censored at the
-  trial duration.
+- ENTRAPPED has three sources (entrapment_source): 'hard_stuck' (orion_safety's HALT with
+  FLAG_HARD_STUCK), 'policy_gave_up' (PolicyStatus.escapes_exhausted: the controller used up
+  its escape attempts and stopped, so the hard-stuck rule, which needs a command > 0.1 m/s,
+  can never fire) and 'operator' (StopTrial). The entrapment end t_end is the HALT, the first
+  give-up status, or the trial end.
+- time-to-entrapment: elapsed time to the end of the trial for ENTRAPPED (the runner ends it at
+  t_end), else censored at the trial duration.
 - entrapment onset t_entrap (ENTRAPPED only): the first FLAG_STUCK of the stuck episode that
-  ended in the HALT. The episode is the last run of FLAG_STUCK that is still high at, or
+  ended at t_end. The episode is the last run of FLAG_STUCK that is still high at, or
   starts after, the last time the rover was >= 0.1 m (hard_stuck_progress_m) away from where
-  it halted; position from the pose track, else integrated TerrainState.body_speed, else the
+  it stopped; position from the pose track, else integrated TerrainState.body_speed, else the
   last FLAG_STUCK run (see entrapment_onset).
 - energy: integral of V_bat * sum|duty_i * I_i| when RoverHealth is recorded (electrical,
   hardware), else of sum|tau_i * w_i| (mechanical, simulation).
@@ -500,15 +505,24 @@ def trial_metrics(meta: dict, msgs: dict, cone_valid: Optional[bool] = None):
                escapes=sum(1 for a, b in zip([None] + modes, modes)
                            if b == MODE_ESCAPE and a != MODE_ESCAPE))
 
-    t_onset, onset_source = math.nan, None
+    t_onset, onset_source, entrapment_source = math.nan, None, None
     if entrapped:
-        t_halt = next((t for t, m in safety if m.flags & FLAG_HARD_STUCK), t1)
+        t_halt = next((t for t, m in safety if m.flags & FLAG_HARD_STUCK), None)
+        t_gave_up = next((t for t, m in msgs.get('/orion/policy_status', [])
+                          if m.escapes_exhausted), None)
+        if t_halt is not None:
+            t_end, entrapment_source = t_halt, 'hard_stuck'
+        elif t_gave_up is not None:
+            t_end, entrapment_source = t_gave_up, 'policy_gave_up'
+        else:
+            t_end, entrapment_source = t1, 'operator'
         onset_source, track = _progress_track(msgs)
         flags = [(t, bool(m.flags & FLAG_STUCK)) for t, m in safety]
-        t_onset = entrapment_onset(flags, track, t_halt)
-        if t_onset is None:     # ENTRAPPED without any FLAG_STUCK (operator outcome)
-            t_onset, onset_source = t_halt, 'halt'
-    row.update(entrapment_onset_s=t_onset - t0, onset_source=onset_source)
+        t_onset = entrapment_onset(flags, track, t_end)
+        if t_onset is None:     # ENTRAPPED without any FLAG_STUCK
+            t_onset, onset_source = t_end, 'end'
+    row.update(entrapment_onset_s=t_onset - t0, onset_source=onset_source,
+               entrapment_source=entrapment_source)
 
     samples = []
     risks = [(t, float(m.entrapment_risk)) for t, m in msgs.get('/orion/policy_status', [])

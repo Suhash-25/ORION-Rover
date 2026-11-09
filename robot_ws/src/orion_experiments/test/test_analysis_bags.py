@@ -24,6 +24,11 @@ def trials_root(tmp_path_factory):
     write_trial(root, 'trapped', cell='light-loose', outcome='ENTRAPPED', elapsed=34.0,
                 speed=0.05, stop_at=8.0, stuck=((2.0, 3.0), (11.0, 35.0)), hard_stuck_at=34.0,
                 escape=None, risk=lambda t: t / 34.0)
+    # Same stop at 8 s; two escapes toggle FLAG_STUCK (11-16 s, 19-24 s) without moving the
+    # rover, then the policy gives up at 24.5 s (no hard-stuck HALT: the command is zero).
+    write_trial(root, 'gave_up', cell='heavy-loose', outcome='ENTRAPPED', elapsed=24.6,
+                speed=0.05, stop_at=8.0, stuck=((11.0, 16.0), (19.0, 24.0)), escape=None,
+                gave_up_at=24.5)
     write_trial(root, 'aborted', outcome='ABORT', elapsed=3.0)
     write_trial(root, 'bad_cone', cell='light-loose', outcome='TIMEOUT', elapsed=60.0,
                 cone=(10.0, 10.0, 10.0))
@@ -58,9 +63,20 @@ def test_metrics_of_an_entrapped_trial_and_calibration_labels(trials_root):
     # (11 s), not from the HALT (34 s) and not from the earlier episode at 2 s.
     assert r.entrapment_onset_s == pytest.approx(11.0) and r.onset_source == \
         '/orion/ground_truth_pose'
+    assert r.entrapment_source == 'hard_stuck'
     labels = [y for _, y in samples['B0']]
     # 20 Hz over 34 s; label 1 from 11 - 10 = 1 s on; the other trials have no critic (NaN)
     assert len(labels) == 681 and sum(labels) == 661
+
+
+def test_policy_give_up_is_dated_at_the_onset_of_its_stuck_episode(trials_root):
+    df, _ = load_trials(trials_root)
+    r = df.set_index('trial_id').loc['gave_up']
+    assert r.entrapped and r.failure and r.entrapment_source == 'policy_gave_up'
+    assert r.time_to_entrapment_s == pytest.approx(24.6)
+    # Same M2 anchor as the hard-stuck HALT: the first FLAG_STUCK of the episode (11 s), not
+    # the give-up (24.5 s) and not the second escape's flag (19 s).
+    assert r.entrapment_onset_s == pytest.approx(11.0)
 
 
 T = np.arange(0.0, 40.0, 0.05)
@@ -106,5 +122,5 @@ def test_cli_writes_report_and_csvs(trials_root, tmp_path, capsys):
         assert (tmp_path / name).exists(), name
     report = (tmp_path / 'report.md').read_text()
     assert 'Phase-0 kill test' in report and 'Critic calibration' in report
-    assert len(pd.read_csv(tmp_path / 'trials.csv')) == 4
+    assert len(pd.read_csv(tmp_path / 'trials.csv')) == 5
     assert 'Phase-0 stage 1:' in capsys.readouterr().out

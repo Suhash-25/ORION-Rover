@@ -88,3 +88,16 @@ The first decision card recommended "drop the gate" with speed included. It was 
 after FIX-C's numbers came in, and replaced by a corrected card (M-011).
 Approved by the user (suhas) at 13:28 on the corrected card: "No gate, failure rate only". It
 is now pre-registered and must not change after the first stage-1 trial.
+
+## D-013 A controller give-up ends the trial ENTRAPPED (FINAL, implementer decision)
+orion_policy gives up after 3 failed escapes: IDLE, zero command. orion_safety's hard-stuck rule
+needs a command > 0.1 m/s, so it never fired and the trial ran to TIMEOUT. Now
+`PolicyStatus.escapes_exhausted` (new field) makes the trial runner end the trial ENTRAPPED,
+dated for the critic labels at the onset of the stuck episode (M2 anchor), and the sim counts
+it the same way (evaluate.py, critic branch labels). Failure rates are unchanged (TIMEOUT and
+ENTRAPPED are both failures); ENTRAPPED counts, time-to-entrapment and calibration labels
+change. Rejected: keep TIMEOUT (labels a stopped, trapped rover "safe" for the rest of the
+trial); keep creeping forward so the hard-stuck rule fires (drives into the trap on purpose and
+still needs 20 s more). Open for the user: whether critic-triggered give-ups (no FLAG_STUCK)
+stay in the calibration set; the analysis records `entrapment_source` so both can be reported.
+SPEC section 8.

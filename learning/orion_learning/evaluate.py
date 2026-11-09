@@ -6,7 +6,9 @@ B1), each at g = 9.81 and again at g = 1.62. The non-cell settings (noise, laten
 randomisation) come from base, by default spec_eval_config(). Every controller sees the same
 seeds per cell (common random numbers). Writes
 <out>/eval_episodes.csv (one row per trial) and <out>/eval_summary.csv with success rate,
-entrapment rate (belly-out or ENTRAPPED by the orion_safety rule), and effective speed.
+entrapment rate (belly-out, ENTRAPPED by the orion_safety rule, or 'gave_up': the escape
+library was exhausted and the controller stopped, which the rover's trial runner records as
+ENTRAPPED, SPEC section 8), and effective speed.
 
 Effective speed of a trial = forward progress / trial time, where trial time is the
 time-to-goal for a success and the full 60 s otherwise (a trapped rover keeps the clock
@@ -34,6 +36,7 @@ GRAVITIES = (9.81, 1.62)
 SPEC_CELL = 'spec'
 EVAL_CELLS = E.CELLS + (SPEC_CELL,)
 ALL_CONTROLLERS = ('B0', 'B2', 'student', 'student+critic', 'teacher')
+ENTRAPMENT_OUTCOMES = ('belly_out', 'hard_stuck', 'gave_up')
 
 
 class _B0:
@@ -42,6 +45,10 @@ class _B0:
 
     def act(self, obs, info):
         return self.c.act(obs, info.get('soft_stuck'))   # monitor-rule FLAG_STUCK, as on the rover
+
+    @property
+    def gave_up(self):
+        return self.c.arbiter.gave_up
 
 
 class _Learned:
@@ -52,6 +59,11 @@ class _Learned:
         self.hist = History(n)
         self.gate = CriticGate(n) if critic is not None else None
         self.modes = []
+
+    @property
+    def gave_up(self):
+        """Escape attempts used up (only with critic gating: no escape arbiter otherwise)."""
+        return None if self.gate is None else self.gate.arbiter.gave_up
 
     @torch.no_grad()
     def act(self, obs, info):
@@ -117,8 +129,12 @@ def run_trials(controller_name: str, cell: str, gravity: float, trials: int, see
     for k in range(env.config.max_steps):
         obs, _, term, trunc, info = env.step(ctl.act(obs, info))
         prog = np.where(done, prog, info['progress'])
-        for key in ('success', 'belly_out', 'hard_stuck', 'out_of_fence'):
-            new = info[key] & ~done
+        events = {key: info[key] for key in ('success', 'belly_out', 'hard_stuck',
+                                             'out_of_fence')}
+        if ctl.gave_up is not None:
+            events['gave_up'] = ctl.gave_up
+        for key, hit in events.items():
+            new = hit & ~done
             outcome[new] = key
             if key == 'success':
                 t_end[new] = (k + 1) * E.DT
@@ -130,7 +146,7 @@ def run_trials(controller_name: str, cell: str, gravity: float, trials: int, see
         rows.append({'controller': controller_name, 'cell': cell, 'gravity': gravity,
                      'trial': i, 'outcome': outcome[i],
                      'success': int(outcome[i] == 'success'),
-                     'entrapped': int(outcome[i] in ('belly_out', 'hard_stuck')),
+                     'entrapped': int(outcome[i] in ENTRAPMENT_OUTCOMES),
                      'time_s': round(float(t_end[i]), 3), 'progress_m': round(float(prog[i]), 4),
                      'effective_speed': round(max(float(prog[i]), 0.0) / float(t_end[i]), 5)})
     return rows

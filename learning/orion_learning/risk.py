@@ -1,9 +1,11 @@
 """Entrapment-risk critic (SPEC F1): branched-rollout labels, BCE training, calibration.
 
 rho(t) = P(an entrapment begins within T_h = 10 s of t | obs, history, escape now). An
-entrapment is a belly-out (at the time it happens) or an orion_safety ENTRAPPED verdict,
-dated at the onset of the stuck episode that ended in it (council M2: the rover's analysis
-uses the same anchor, never the HALT time ~23 s after the wheels stop).
+entrapment is a belly-out (at the time it happens), an orion_safety ENTRAPPED verdict or a
+give-up of the controller (escape library exhausted; the rover's trial runner ends such a
+trial ENTRAPPED, SPEC section 8), the last two dated at the onset of the stuck episode that
+ended in them (council M2: the rover's analysis uses the same anchor, never the HALT time
+~23 s after the wheels stop).
 
 Label of a visited state: clone the env state into K = 4 branches; branch b runs escape
 manoeuvre b of the library E at once, then B0 (cruise, slip governor, stuck -> next escape),
@@ -59,6 +61,22 @@ class CriticConfig:
     gate_hold_s: tuple[float, float] = (0.5, 3.0)
 
 
+def entrapment_events(info: dict, gave_up) -> tuple[np.ndarray, np.ndarray]:
+    """(event, date in s of episode time) per rover for one env step.
+
+    event: belly-out, ENTRAPPED (orion_safety rule) or gave_up (the controller's escape
+    attempts are used up; a latched flag, mask repeats with the caller's own `ended`). Dates:
+    belly-out when it happens; ENTRAPPED and give-up at the onset of the stuck episode, and a
+    give-up outside any stuck episode (escapes armed by the critic) at the give-up itself.
+    """
+    gave_up = np.asarray(gave_up, dtype=bool)
+    onset = info['stuck_onset']
+    give_up_date = np.where(onset >= 0.0, onset, info['episode_time'])
+    verdict = info['belly_out'] | info['hard_stuck']
+    date = np.where(verdict, info['entrapment_time'], give_up_date)
+    return verdict | gave_up, date
+
+
 def branch_labels(env_cfg: EnvConfig, snapshot: dict, branches: int, horizon_s: float,
                   seed: int) -> np.ndarray:
     """Fraction of K branches with an entrapment dated within horizon_s, per snapshot rover.
@@ -83,9 +101,9 @@ def branch_labels(env_cfg: EnvConfig, snapshot: dict, branches: int, horizon_s: 
     for _ in range(int(round((horizon_s + HARD_STUCK_WINDOW_S + LABEL_SLACK_S) / DT))):
         obs, _, term, _, info = env.step(ctl.act(obs, stuck))
         stuck = info['soft_stuck']
-        event = (info['belly_out'] | info['hard_stuck']) & ~ended
-        failed |= event & (info['entrapment_time'] <= deadline)
-        ended |= term
+        event, date = entrapment_events(info, ctl.arbiter.gave_up)
+        failed |= event & ~ended & (date <= deadline)
+        ended |= term | ctl.arbiter.gave_up      # a rover that gave up stays stopped
         # Past the deadline only a stuck episode that began by then can still turn positive.
         onset = info['stuck_onset']
         pending = (onset >= 0.0) & (onset <= deadline)

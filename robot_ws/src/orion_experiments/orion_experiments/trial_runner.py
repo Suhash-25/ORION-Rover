@@ -10,6 +10,10 @@ Services
 The trial also ends by itself on
   timeout                              -> OUTCOME_TIMEOUT
   SafetyStatus FLAG_HARD_STUCK          -> OUTCOME_ENTRAPPED
+  PolicyStatus.escapes_exhausted rises  -> OUTCOME_ENTRAPPED (the controller gave up after
+      max_escape_attempts escapes and stopped; orion_safety's hard-stuck rule needs a command
+      > 0.1 m/s and would never fire, SPEC section 8). metadata policy_gave_up_ros_s = the
+      stamp of the first PolicyStatus with the flag.
   SafetyStatus HALT / ESTOP otherwise   -> OUTCOME_SAFETY
   ground truth progress >= goal_distance_m along the start heading -> OUTCOME_SUCCESS
 Ending a trial sets the controller to IDLE, stops the bag and writes metadata.json next to it
@@ -226,7 +230,7 @@ class TrialRunner(Node):
                 'require_external_speed': bool(self.param('require_external_speed')),
                 'external_speed_for_s': self.external_speed_for_s(),
                 'goal_distance_m': float(self.param('goal_distance_m')),
-                'start_pose': None, 'final_progress_m': None,
+                'start_pose': None, 'final_progress_m': None, 'policy_gave_up_ros_s': None,
                 'bag_path': os.path.abspath(bag_path), 'bag_exit_code': None,
                 'start_wall': None, 'start_ros_s': None, 'end_wall': None, 'end_ros_s': None,
                 'elapsed_s': None, 'outcome': None, 'outcome_code': None,
@@ -297,10 +301,21 @@ class TrialRunner(Node):
                          msg.reason)
 
     def _on_policy(self, msg: PolicyStatus):
-        self._status = msg
+        prev, self._status = self._status, msg
+        # Only a rising edge: a flag still latched from before the trial's SetMode is not a
+        # give-up of this trial.
+        gave_up = msg.escapes_exhausted and not (prev is not None and prev.escapes_exhausted)
         with self._lock:
-            if self._trial is not None and msg.mode not in self._trial['modes_seen']:
+            if self._trial is None:
+                return
+            if msg.mode not in self._trial['modes_seen']:
                 self._trial['modes_seen'].append(int(msg.mode))
+            if not gave_up or self._trial['start_ros_s'] is None:
+                return
+            stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            self._trial['policy_gave_up_ros_s'] = stamp
+            self._finish(StopTrial.Request.OUTCOME_ENTRAPPED, 'policy gave up',
+                         'escape library exhausted (PolicyStatus.escapes_exhausted)')
 
     def _on_pose(self, msg: PoseStamped):
         with self._lock:

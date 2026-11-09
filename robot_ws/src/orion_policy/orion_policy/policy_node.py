@@ -148,6 +148,7 @@ class PolicyNode(Node):
         status.policy_sha = result.policy_sha
         status.obs_spec_hash = obs_spec.OBS_SPEC_HASH
         status.critic_gating = bool(self.core.cfg.critic_gating)
+        status.escapes_exhausted = bool(self.core.escapes_exhausted)
         self.status_pub.publish(status)
         if result.reason and not self._last_reason:
             self.get_logger().warn(f'[{MODE_NAMES[result.mode]}] {result.reason}')

@@ -17,7 +17,10 @@ Modes (PolicyStatus.MODE_*):
             cyclic from E[0] after each SetMode) on /cmd_vel/escape, then back to the mode it
             interrupted. Armed by SafetyStatus FLAG_STUCK, by rho > 0.7 or by SetMode. After
             max_escape_attempts escapes without a clean driving tick in between the core
-            gives up and goes to IDLE (orion_safety's hard-stuck rule then ends the trial).
+            gives up: IDLE with a zero command and escapes_exhausted set until the next
+            SetMode (PolicyStatus.escapes_exhausted). orion_safety's hard-stuck rule needs a
+            command > 0.1 m/s, so it would never fire on the stopped rover; the trial runner
+            ends the trial ENTRAPPED on the flag instead (SPEC section 8).
 
 The adapter's history (orion_learning.history, the training code) gets [obs, previous
 executed command] pushed every tick that builds an observation, BEFORE inference, and is
@@ -117,6 +120,7 @@ class PolicyCore:
         self.history = History(1)
         self.entry_path = EntryPath(config.dt, config.retreat_path_s)
         self.escape_attempts = 0
+        self.escapes_exhausted = False       # gave up; cleared by the next SetMode
         self._escape_index = 0               # next manoeuvre of E
         self._plan: Optional[Plan] = None    # PROBE / ESCAPE plan
         self._retreat: Optional[Plan] = None
@@ -139,6 +143,7 @@ class PolicyCore:
         if mode == MODE_POLICY and self.policy is None:
             return False, 'no ONNX controller loaded (set model_dir); POLICY unavailable'
         self._retreat = None
+        self.escapes_exhausted = False
         if mode in (MODE_IDLE, MODE_BASELINE, MODE_POLICY):
             self._plan = None
             self.base_mode = mode
@@ -188,6 +193,7 @@ class PolicyCore:
         self._retreat = None
         if self.escape_attempts >= self.cfg.max_escape_attempts:
             self._plan = None
+            self.escapes_exhausted = True
             self.base_mode = MODE_IDLE
             self._set_mode(MODE_IDLE)
             return False
@@ -328,6 +334,6 @@ class PolicyCore:
         result.publish += [(ch, 0.0, 0.0) for ch in self._pending_zero]
         self._pending_zero = []
         result.mode = self.mode
-        result.reason = (f'escape failed {self.cfg.max_escape_attempts} times: IDLE '
-                         '(waiting for orion_safety hard-stuck or an operator)')
+        result.reason = (f'escape failed {self.cfg.max_escape_attempts} times: IDLE, '
+                         'escapes_exhausted (the trial runner ends the trial ENTRAPPED)')
         return result

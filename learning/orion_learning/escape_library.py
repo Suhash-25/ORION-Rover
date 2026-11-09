@@ -7,8 +7,9 @@ orion_policy imports E from here; a test checks the identity.
 
 Each manoeuvre is a named tuple of (duration_s, v_mps, w_radps) segments. Successive escapes
 of one stuck episode run the next manoeuvre (cyclic); after MAX_ESCAPE_ATTEMPTS escapes
-without a clean driving step in between, the controller gives up and stops (on the rover
-orion_safety's hard-stuck rule then ends the trial). |v| <= 0.2 m/s and |w| <= 0.8 rad/s;
+without a clean driving step in between, the controller gives up and stops; the trial is
+then ENTRAPPED (on the rover the trial runner ends it on PolicyStatus.escapes_exhausted, in
+simulation evaluate.py and the critic labels count it; SPEC section 8). |v| <= 0.2 m/s and |w| <= 0.8 rad/s;
 on the rover the commands are still rate-limited and scaled to the SafetyStatus limits.
 
 Order = order of use, so the rover's three attempts run the first three. Chosen on env data

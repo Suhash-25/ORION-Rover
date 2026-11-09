@@ -204,6 +204,26 @@ def test_hard_stuck_is_entrapped_and_halt_is_safety(rig_factory):
     assert m['outcome'] == 'SAFETY' and m['notes'] == 'tilt 26 deg'
 
 
+def test_policy_give_up_is_entrapped(rig_factory):
+    rig = rig_factory()
+    # A flag still latched from before the trial is not a give-up of this trial.
+    rig.status.publish(PolicyStatus(mode=0, escapes_exhausted=True))
+    time.sleep(0.2)
+    assert rig.start().success
+    rig.status.publish(PolicyStatus(mode=0, escapes_exhausted=True))
+    time.sleep(0.3)
+    assert rig.meta()['outcome'] is None
+    rig.status.publish(PolicyStatus(mode=1))
+    time.sleep(0.1)
+    gave_up = PolicyStatus(mode=0, escapes_exhausted=True)
+    gave_up.header.stamp.sec, gave_up.header.stamp.nanosec = 1234, 500000000
+    rig.status.publish(gave_up)
+    m = rig.wait_outcome()
+    assert m['outcome'] == 'ENTRAPPED' and m['outcome_source'] == 'policy gave up'
+    assert m['policy_gave_up_ros_s'] == pytest.approx(1234.5)
+    assert rig.modes[-1] == PolicyStatus.MODE_IDLE
+
+
 def test_ground_truth_goal_line_is_success(rig_factory):
     rig = rig_factory()
     assert rig.start().success

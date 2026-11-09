@@ -154,10 +154,29 @@ ballast, cone depths, operator, timestamp, bag path.
 
 Failure = outcome TIMEOUT, ENTRAPPED or SAFETY (pre-registered). SAFETY includes the current
 HALT, whose threshold I_peak (12 A) is a GUESS until the motor drivers are known (section 5), so
-the report lists SAFETY outcomes per cell next to every test. Critic calibration label at time
+the report lists SAFETY outcomes per cell next to every test.
+
+ENTRAPPED has two automatic triggers (decided 2026-11-09, FINAL; this changes what is
+labelled ENTRAPPED, not what counts as failure): (1) orion_safety's hard-stuck HALT
+(section 5); (2) **the controller gives up**: after `max_escape_attempts` (3) escapes of the
+library E without a clean driving tick in between, orion_policy goes IDLE with a zero command
+and sets `PolicyStatus.escapes_exhausted`; the trial runner ends the trial ENTRAPPED (source
+"policy gave up", `policy_gave_up_ros_s` in metadata.json). Why: the hard-stuck rule needs a
+command > 0.1 m/s, so it can never fire on a rover that has stopped itself, and the trial
+would otherwise run to TIMEOUT. TIMEOUT and ENTRAPPED are both failures, so the Phase-0 and
+main-study failure rates do not change; what changes is time-to-entrapment, the ENTRAPPED
+count and the critic calibration labels (a rover sitting still after giving up is not "safe"
+for the rest of the trial). The give-up is labelled like the HALT: t_entrap is the first
+FLAG_STUCK of the stuck episode that ended in the give-up (analysis `entrapment_source` =
+'policy_gave_up'); a give-up without any FLAG_STUCK (escapes armed by the critic, rho > 0.7)
+is dated at the give-up itself. Caveat: in that last case the critic's own output started the
+escapes that ended in the label, so the report gives `entrapment_source` per trial and
+calibration can be repeated without those trials. Simulation counts it the same way
+(`evaluate.py` outcome 'gave_up', critic branch labels via `risk.entrapment_events`). Critic calibration label at time
 t (council M2): in an ENTRAPPED trial 1 if t_entrap - t <= 10 s, where t_entrap is the first
-FLAG_STUCK of the stuck episode that ended in the hard-stuck HALT (not the HALT, which comes
-~23 s after motion stops); in other trials 0 when >= 10 s of trial remain, else censored.
+FLAG_STUCK of the stuck episode that ended in the hard-stuck HALT or the give-up (not the
+HALT, which comes ~23 s after motion stops); in other trials 0 when >= 10 s of trial remain,
+else censored.
 
 Phase-0 kill test (pre-registered, two-stage; D-008): B0 tuned on light-packed (cell C).
 Stage 1 (pilot): 20 trials in each of the 4 cells. Early GO if for at least one loose cell the

@@ -172,7 +172,8 @@ class _EscapeArbiter:
 
     An escape starts when triggered and not already escaping. A rover that triggers again
     after MAX_ESCAPE_ATTEMPTS escapes with no clean (untriggered) driving tick in between gives
-    up: it stops until reset (on the rover: IDLE, then orion_safety's hard-stuck HALT).
+    up: it stops until reset (on the rover: IDLE and PolicyStatus.escapes_exhausted, which
+    the trial runner records as ENTRAPPED; SPEC section 8).
     """
 
     def __init__(self, num_envs: int, dt: float, start_index=None,

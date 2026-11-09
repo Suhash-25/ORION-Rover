@@ -24,13 +24,15 @@ def _header(ts, t, frame=''):
 
 def write_trial(root, trial_id, *, cell='light-packed', controller='B0', outcome='SUCCESS',
                 elapsed=20.0, speed=0.075, stuck=((5.0, 8.0),), escape=(5.5, 6.5),
-                risk=None, cone=(10.0, 11.0, 12.0), stop_at=None, hard_stuck_at=None):
+                risk=None, cone=(10.0, 11.0, 12.0), stop_at=None, hard_stuck_at=None,
+                gave_up_at=None):
     """
     Write one trial with known metrics.
 
     Straight drive at speed along YAW0 (standing still from stop_at on), slip_side (0.2, 0.4),
     sinkage 0.1, 4 wheels at 2 rad/s and 1 N.m, FLAG_STUCK in each (start, end) of stuck,
-    one escape, and HALT with FLAG_HARD_STUCK from hard_stuck_at (times after start, s).
+    one escape, HALT with FLAG_HARD_STUCK from hard_stuck_at, and PolicyStatus IDLE with
+    escapes_exhausted from gave_up_at (times after start, s).
     risk(t_rel) gives PolicyStatus.entrapment_risk (NaN when None).
     """
     import numpy as np
@@ -82,11 +84,12 @@ def write_trial(root, trial_id, *, cell='light-packed', controller='B0', outcome
                 flags=(16 if is_stuck else 0) | (64 if halted else 0),
                 max_linear_speed=0.5, max_angular_speed=1.0, max_current=6.0, reason=''))
             in_escape = escape is not None and escape[0] <= t - T0 < escape[1]
+            gave_up = gave_up_at is not None and t - T0 >= gave_up_at
             write('/orion/policy_status', t, T['orion_msgs/msg/PolicyStatus'](
-                header=_header(ts, t), mode=4 if in_escape else 1,
+                header=_header(ts, t), mode=0 if gave_up else 4 if in_escape else 1,
                 entrapment_risk=float('nan') if risk is None else risk(t - T0),
                 latent=np.zeros(8, np.float32), policy_sha='', obs_spec_hash='',
-                critic_gating=risk is not None))
+                critic_gating=risk is not None, escapes_exhausted=gave_up))
             write('/joint_states', t, T['sensor_msgs/msg/JointState'](
                 header=_header(ts, t), name=['fl', 'fr', 'rl', 'rr'],
                 position=np.zeros(4), velocity=np.full(4, 2.0), effort=np.full(4, 1.0)))

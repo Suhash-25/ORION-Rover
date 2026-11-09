@@ -133,9 +133,23 @@ def test_escape_gives_up_to_idle_after_max_attempts():
     rig.flags = FLAG_STUCK
     res = rig.run(ESCAPE_TICKS + len(escape_plan(DT, 1)))      # E[0], then E[1]
     assert all(r.mode == MODE_ESCAPE for r in res)
+    assert not rig.core.escapes_exhausted
     res = rig.step()
     assert rig.core.mode == MODE_IDLE and 'escape failed 2 times' in res.reason
+    assert rig.core.escapes_exhausted
     assert commands(rig.run(3)) == []
+    assert rig.core.escapes_exhausted, 'latched until the next SetMode'
+    rig.core.request_mode(MODE_BASELINE)
+    assert not rig.core.escapes_exhausted
+
+
+def test_escapes_exhausted_is_not_set_by_idle_from_set_mode():
+    rig = Rig()
+    rig.core.request_mode(MODE_BASELINE)
+    rig.run(5)
+    rig.core.request_mode(MODE_IDLE)
+    rig.run(3)
+    assert rig.core.mode == MODE_IDLE and not rig.core.escapes_exhausted
 
 
 def test_set_mode_escape_from_idle_returns_to_idle():

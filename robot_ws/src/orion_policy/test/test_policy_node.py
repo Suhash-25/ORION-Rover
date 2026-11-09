@@ -55,6 +55,7 @@ class Feeder:
         n.create_subscription(PolicyStatus, '/orion/policy_status',
                               lambda m: self.got['status'].append((time.monotonic(), m)), 10)
         self.send_safety = True
+        self.safety_flags = 0
         n.create_timer(0.02, self._publish)
 
     def _publish(self):
@@ -66,8 +67,8 @@ class Feeder:
         self.imu.publish(imu)
         self.terrain.publish(TerrainState(body_speed=0.1, confidence=0.9))
         if self.send_safety:
-            self.safety.publish(SafetyStatus(state=0, max_linear_speed=0.5,
-                                             max_angular_speed=1.0))
+            self.safety.publish(SafetyStatus(state=0, flags=self.safety_flags,
+                                             max_linear_speed=0.5, max_angular_speed=1.0))
 
 
 def spin(executor, seconds):
@@ -112,6 +113,25 @@ def test_baseline_drives_reports_and_stops_on_stale_safety(ros):
     spin(ex, 1.0)
     late = [m.twist.linear.x for t, m in feeder.got['policy'] if t > t_stop + 0.7]
     assert late and all(v == 0.0 for v in late), 'stale SafetyStatus must give zero'
+    node.destroy_node()
+    feeder.node.destroy_node()
+
+
+def test_give_up_is_reported_until_the_next_set_mode(ros):
+    # max_escape_attempts 0: the first FLAG_STUCK already exhausts the escape library.
+    node, feeder, ex = make({'initial_mode': 'BASELINE', 'max_escape_attempts': 0})
+    spin(ex, 0.5)
+    assert not feeder.got['status'][-1][1].escapes_exhausted
+    feeder.safety_flags = SafetyStatus.FLAG_STUCK
+    spin(ex, 0.5)
+    last = feeder.got['status'][-1][1]
+    assert last.escapes_exhausted and last.mode == PolicyStatus.MODE_IDLE
+    feeder.safety_flags = 0
+    spin(ex, 0.3)
+    assert feeder.got['status'][-1][1].escapes_exhausted, 'latched'
+    assert call_set_mode(feeder, ex, PolicyStatus.MODE_BASELINE).success
+    spin(ex, 0.3)
+    assert not feeder.got['status'][-1][1].escapes_exhausted
     node.destroy_node()
     feeder.node.destroy_node()
 
