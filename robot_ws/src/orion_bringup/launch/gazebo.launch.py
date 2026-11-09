@@ -6,7 +6,6 @@ from launch.actions import DeclareLaunchArgument
 from launch.actions import IncludeLaunchDescription
 from launch.actions import RegisterEventHandler
 from launch.event_handlers import OnProcessExit
-from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command
 from launch.substitutions import LaunchConfiguration
@@ -20,7 +19,6 @@ def generate_launch_description():
     bringup_pkg = get_package_share_directory("orion_bringup")
     description_pkg = get_package_share_directory("orion_description")
     gazebo_pkg = get_package_share_directory("ros_gz_sim")
-    bridge_pkg = get_package_share_directory("ros_gz_bridge")
     control_pkg = get_package_share_directory("orion_control")
 
     declare_world = DeclareLaunchArgument(
@@ -79,19 +77,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    clock_bridge = IncludeLaunchDescription(
-        AnyLaunchDescriptionSource(
-            os.path.join(
-                bridge_pkg,
-                "launch",
-                "clock_bridge.launch",
-            )
-        ),
-        launch_arguments={
-            "bridge_name": "orion_clock_bridge",
-        }.items(),
-    )
-
     robot_state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
@@ -120,6 +105,7 @@ def generate_launch_description():
         package="ros_gz_bridge",
         executable="parameter_bridge",
         arguments=[
+            "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
             "/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",
             "/imu/data@sensor_msgs/msg/Imu@gz.msgs.IMU",
         ],
@@ -143,7 +129,6 @@ def generate_launch_description():
             declare_headless,
             declare_teleop,
             gazebo,
-            clock_bridge,
             robot_state_publisher,
             RegisterEventHandler(
                 OnProcessExit(
