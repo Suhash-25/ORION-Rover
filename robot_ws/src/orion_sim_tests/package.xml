@@ -24,6 +24,8 @@
   <test_depend>orion_safety</test_depend>
   <test_depend>orion_policy</test_depend>
   <test_depend>orion_bringup</test_depend>
+  <!-- test_policy_onnx also needs pip-only torch, onnx and orion_learning
+       (orion_policy/requirements.txt, scripts/ci_pip_deps.sh). -->
   <test_depend>navigation2</test_depend>
 
   <export>

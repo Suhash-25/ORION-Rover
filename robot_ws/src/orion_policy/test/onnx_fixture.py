@@ -63,17 +63,23 @@ def _export(module, args, path, input_names, output_names, metadata):
 
 def export_artefact(directory, controller='student', adapter=True, critic=True,
                     critic_bias=0.0, file_hash=None, manifest_hash=None,
-                    input_names=None, seed=0):
+                    input_names=None, seed=0, policy_action=None):
     """
     Write adapter/policy/critic ONNX + manifest.json to directory; return the modules.
 
     file_hash / manifest_hash override obs_spec_hash (to test refusal); input_names
-    overrides the policy's input names (to test the I/O check).
+    overrides the policy's input names (to test the I/O check). policy_action (a0, a1) in
+    (-1, 1) makes the policy output that constant action (zero weights, bias atanh(a)), e.g.
+    (0.6, 0.0) = 0.3 m/s straight, for a predictable drive in simulation.
     """
     torch.manual_seed(seed)
     os.makedirs(directory, exist_ok=True)
     modules = {'adapter': TinyAdapter() if adapter else None, 'policy': TinyPolicy(),
                'critic': TinyCritic(critic_bias) if critic else None}
+    if policy_action is not None:
+        with torch.no_grad():
+            modules['policy'].lin.weight.zero_()
+            modules['policy'].lin.bias.copy_(torch.atanh(torch.tensor(policy_action)))
     obs = torch.zeros(1, obs_spec.OBS_DIM)
     latent = torch.zeros(1, obs_spec.LATENT_DIM)
     history = torch.zeros(1, obs_spec.HISTORY_LEN, ROW)

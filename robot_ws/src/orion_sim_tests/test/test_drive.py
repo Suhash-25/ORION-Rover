@@ -16,6 +16,9 @@ import launch_testing.markers
 from nav_msgs.msg import Odometry
 import pytest
 import rclpy
+from rclpy.qos import HistoryPolicy
+from rclpy.qos import QoSProfile
+from rclpy.qos import ReliabilityPolicy
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import JointState
 from sensor_msgs.msg import LaserScan
@@ -28,6 +31,14 @@ from sim_helpers import include_bringup, kill_leftover_gazebo, Probe  # noqa: E4
 # Through twist_mux like every command source (teleop slot, priority 200).
 CMD_TOPIC = '/cmd_vel/teleop'
 ODOM_TOPIC = '/diff_drive_controller/odom'
+# Round 7 needs /joint_states and /imu/data at 100 Hz (docs/INTERFACES.md); allow 10 % slack.
+MIN_SENSOR_RATE_HZ = 90.0
+
+
+def sim_rate_hz(stamps):
+    """Messages per second of sim time from header stamps (s), duplicates dropped."""
+    s = sorted(set(stamps))
+    return (len(s) - 1) / (s[-1] - s[0]) if len(s) > 1 and s[-1] > s[0] else 0.0
 
 
 @pytest.mark.launch_test
@@ -81,6 +92,37 @@ class TestDrive(unittest.TestCase):
         acc = self.node.latest['/imu/data'].linear_acceleration
         self.assertAlmostEqual(acc.z, 9.8, delta=0.5, msg=f'IMU z accel {acc.z:.2f} at rest')
         self.assertEqual(self.node.latest['/imu/data'].header.frame_id, 'imu_link')
+
+    def test_2c_joint_states_and_imu_at_100_hz_sim_time(self):
+        """
+        Header-stamp rate over >= 2 s of sim time.
+
+        Sim time, so a slow real-time factor cannot hide a misconfigured update_rate
+        (controller_manager 100 Hz; IMU sensor 100 Hz).
+        """
+        stamps = {'/joint_states': [], '/imu/data': []}
+        # Best effort (matches both publishers) with a deep queue so the probe drops nothing.
+        qos = QoSProfile(depth=500, history=HistoryPolicy.KEEP_LAST,
+                         reliability=ReliabilityPolicy.BEST_EFFORT)
+
+        def record(msg, topic):
+            stamps[topic].append(msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec)
+
+        subs = [self.node.create_subscription(msg_type, topic,
+                                              lambda m, t=topic: record(m, t), qos)
+                for msg_type, topic in ((JointState, '/joint_states'), (Imu, '/imu/data'))]
+        try:
+            ok = self.node.spin_until(
+                lambda: all(len(v) > 1 and max(v) - min(v) >= 2.0 for v in stamps.values()),
+                timeout_s=60)
+        finally:
+            for sub in subs:
+                self.node.destroy_subscription(sub)
+        self.assertTrue(ok, {k: len(v) for k, v in stamps.items()})
+        rates = {topic: round(sim_rate_hz(values), 1) for topic, values in stamps.items()}
+        print(f'sensor rates (Hz, sim time): {rates}')
+        for topic, rate in rates.items():
+            self.assertGreaterEqual(rate, MIN_SENSOR_RATE_HZ, f'Hz sim time: {rates}')
 
     def test_3_tf_chain(self):
         def has_tf():
