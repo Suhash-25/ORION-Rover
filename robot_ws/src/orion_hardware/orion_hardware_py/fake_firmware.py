@@ -112,6 +112,8 @@ class FakeFirmware:
             os.write(self._fd, data)
         except BlockingIOError:
             pass  # host is not reading; drop like a full UART FIFO would
+        except OSError:
+            self._stop.set()  # the device went away (PTY closed): behave like a dead board
 
     def _send_log(self, text: str):
         self.logs_sent.append(text)
