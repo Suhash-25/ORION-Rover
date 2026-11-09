@@ -195,8 +195,11 @@ OrionSystem::CallbackReturn OrionSystem::on_configure(const rclcpp_lifecycle::St
   }
 
   // Fill the state interfaces once so controllers start from the real wheel positions.
-  return read(rclcpp::Time(0, 0, RCL_STEADY_TIME), rclcpp::Duration(0, 0)) == return_type::OK ?
-         CallbackReturn::SUCCESS : CallbackReturn::FAILURE;
+  if (read(rclcpp::Time(0, 0, RCL_STEADY_TIME), rclcpp::Duration(0, 0)) != return_type::OK) {
+    release_link();
+    return CallbackReturn::FAILURE;
+  }
+  return CallbackReturn::SUCCESS;
 }
 
 void OrionSystem::release_link()
