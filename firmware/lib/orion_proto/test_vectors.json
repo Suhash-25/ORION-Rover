@@ -115,7 +115,7 @@
   },
   {
    "fields": {
-    "id": 7,
+    "param_id": 7,
     "value": 4096.0
    },
    "name": "set_param",
@@ -126,7 +126,7 @@
   },
   {
    "fields": {
-    "id": 5,
+    "param_id": 5,
     "status": 2,
     "value": 0.25
    },

@@ -144,8 +144,9 @@ public:
   void send_raw(uint8_t type, const std::vector<uint8_t> & payload)
   {
     uint8_t wire[op::kMaxWireFrame];
-    const size_t n = op::encode_frame(type, host_seq++, payload.data(), payload.size(), wire,
-        sizeof(wire));
+    const size_t n = op::encode_frame(
+      type, host_seq++, payload.data(), payload.size(), wire,
+      sizeof(wire));
     for (size_t i = 0; i < n; ++i) {
       core.on_rx_byte(wire[i]);
     }

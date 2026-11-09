@@ -28,8 +28,9 @@ const mini_json::Value & vectors()
 Bytes wire_of(uint8_t type, uint8_t seq, const Bytes & payload)
 {
   Bytes out(op::kMaxWireFrame);
-  const size_t n = op::encode_frame(type, seq, payload.data(), payload.size(), out.data(),
-      out.size());
+  const size_t n = op::encode_frame(
+    type, seq, payload.data(), payload.size(), out.data(),
+    out.size());
   out.resize(n);
   return out;
 }
@@ -54,7 +55,7 @@ FeedResult feed(const Bytes & bytes)
 }
 
 template<size_t N, typename T>
-void expect_array(const mini_json::Value & arr, const T (&actual)[N])
+void expect_array(const mini_json::Value & arr, const T (& actual)[N])
 {
   ASSERT_EQ(arr.array.size(), N);
   for (size_t i = 0; i < N; ++i) {
@@ -92,7 +93,7 @@ void check_fields(const op::Frame & frame, const mini_json::Value & f, const Byt
     case op::MSG_SET_PARAM: {
         op::SetParamMsg m;
         ASSERT_TRUE(op::decode_msg(frame, m));
-        EXPECT_EQ(m.id, f["id"].as_int());
+        EXPECT_EQ(m.id, f["param_id"].as_int());
         EXPECT_EQ(m.value, static_cast<float>(f["value"].number));
         m.pack(repacked.data());
         break;
@@ -100,7 +101,7 @@ void check_fields(const op::Frame & frame, const mini_json::Value & f, const Byt
     case op::MSG_PARAM_ACK: {
         op::ParamAckMsg m;
         ASSERT_TRUE(op::decode_msg(frame, m));
-        EXPECT_EQ(m.id, f["id"].as_int());
+        EXPECT_EQ(m.id, f["param_id"].as_int());
         EXPECT_EQ(m.value, static_cast<float>(f["value"].number));
         EXPECT_EQ(m.status, f["status"].as_int());
         m.pack(repacked.data());
@@ -202,8 +203,9 @@ TEST(Frames, EncodeMatchesGoldenVectors)
     const Bytes payload = mini_json::from_hex(v["payload"].string);
     const Bytes wire = mini_json::from_hex(v["wire"].string);
     EXPECT_EQ(
-      wire_of(static_cast<uint8_t>(v["type"].as_int()), static_cast<uint8_t>(v["seq"].as_int()),
-      payload), wire);
+      wire_of(
+        static_cast<uint8_t>(v["type"].as_int()), static_cast<uint8_t>(v["seq"].as_int()),
+        payload), wire);
   }
 }
 
@@ -244,8 +246,10 @@ TEST(Frames, MaximumPayloadFitsWireBuffer)
   // One byte more must be refused by the encoder.
   payload.push_back(0);
   Bytes out(op::kMaxWireFrame * 2);
-  EXPECT_EQ(op::encode_frame(op::MSG_LOG, 0, payload.data(), payload.size(), out.data(),
-    out.size()), 0u);
+  EXPECT_EQ(
+    op::encode_frame(
+      op::MSG_LOG, 0, payload.data(), payload.size(), out.data(),
+      out.size()), 0u);
 }
 
 TEST(Frames, EveryTruncationIsRejectedAndCounted)
