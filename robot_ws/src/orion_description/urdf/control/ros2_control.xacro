@@ -32,6 +32,10 @@
 
         <state_interface name="velocity"/>
 
+        <!-- Motor effort: torque in sim, measured motor current on the real rover.
+             orion_terrain uses it as the sinkage / bogging-down signal. -->
+        <state_interface name="effort"/>
+
       </joint>
 
       <!-- ===================================================== -->
@@ -45,6 +49,10 @@
         <state_interface name="position"/>
 
         <state_interface name="velocity"/>
+
+        <!-- Motor effort: torque in sim, measured motor current on the real rover.
+             orion_terrain uses it as the sinkage / bogging-down signal. -->
+        <state_interface name="effort"/>
 
       </joint>
 
@@ -60,6 +68,10 @@
 
         <state_interface name="velocity"/>
 
+        <!-- Motor effort: torque in sim, measured motor current on the real rover.
+             orion_terrain uses it as the sinkage / bogging-down signal. -->
+        <state_interface name="effort"/>
+
       </joint>
 
       <!-- ===================================================== -->
@@ -73,6 +85,10 @@
         <state_interface name="position"/>
 
         <state_interface name="velocity"/>
+
+        <!-- Motor effort: torque in sim, measured motor current on the real rover.
+             orion_terrain uses it as the sinkage / bogging-down signal. -->
+        <state_interface name="effort"/>
 
       </joint>
 

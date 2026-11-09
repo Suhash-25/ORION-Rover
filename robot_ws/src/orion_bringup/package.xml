@@ -36,6 +36,14 @@
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
 
+  <!-- Navigation and mapping launched by navigation/localization/slam.launch.py.
+       Without these, rosdep on a fresh machine installs Gazebo but not Nav2. -->
+  <exec_depend>navigation2</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>

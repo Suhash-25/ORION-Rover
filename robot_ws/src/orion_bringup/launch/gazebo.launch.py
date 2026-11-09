@@ -1,22 +1,18 @@
-from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    IncludeLaunchDescription,
-    RegisterEventHandler,
-)
-from launch.event_handlers import OnProcessExit
-from launch.launch_description_sources import (
-    AnyLaunchDescriptionSource,
-    PythonLaunchDescriptionSource,
-)
-from launch.substitutions import Command, LaunchConfiguration
-
-from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
+import os
 
 from ament_index_python.packages import get_package_share_directory
-
-import os
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription
+from launch.actions import RegisterEventHandler
+from launch.event_handlers import OnProcessExit
+from launch.launch_description_sources import AnyLaunchDescriptionSource
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import Command
+from launch.substitutions import LaunchConfiguration
+from launch.substitutions import PythonExpression
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -39,6 +35,24 @@ def generate_launch_description():
 
     world = LaunchConfiguration("world")
 
+    # headless:=true runs the Gazebo server only (no GUI) with offscreen
+    # rendering, so the lidar still works on CI machines without a display.
+    declare_headless = DeclareLaunchArgument(
+        "headless",
+        default_value="false",
+        description="Run Gazebo without a GUI (CI and remote machines)",
+    )
+    declare_teleop = DeclareLaunchArgument(
+        "teleop",
+        default_value="true",
+        description="Open the keyboard teleop terminal once controllers are up",
+    )
+    headless = LaunchConfiguration("headless")
+    gz_args = PythonExpression([
+        "'-r -s --headless-rendering ' if '", headless,
+        "' == 'true' else '-r '",
+    ])
+
     xacro_file = os.path.join(
         description_pkg,
         "urdf",
@@ -60,7 +74,8 @@ def generate_launch_description():
             )
         ),
         launch_arguments={
-            "gz_args": world,
+            "gz_args": [gz_args, world],
+            "on_exit_shutdown": "true",
         }.items(),
     )
 
@@ -117,12 +132,15 @@ def generate_launch_description():
                 "launch",
                 "controllers.launch.py",
             )
-        )
+        ),
+        launch_arguments={"teleop": LaunchConfiguration("teleop")}.items(),
     )
 
     return LaunchDescription(
         [
             declare_world,
+            declare_headless,
+            declare_teleop,
             gazebo,
             clock_bridge,
             robot_state_publisher,

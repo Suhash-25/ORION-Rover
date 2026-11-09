@@ -25,4 +25,13 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  # No per-file license headers in this repo (LICENSE covers it); C++ style is uncrustify's job.
+  set(ament_cmake_copyright_FOUND TRUE)
+  set(ament_cmake_cpplint_FOUND TRUE)
+  set(ament_cmake_flake8_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../flake8.ini")
+  ament_lint_auto_find_test_dependencies()
+endif()
+
 ament_package()

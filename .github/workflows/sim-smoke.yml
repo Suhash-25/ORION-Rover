@@ -1,0 +1,61 @@
+# Headless Gazebo smoke tests: the rover spawns, controllers come up, it drives,
+# and Nav2 reaches a goal. Proves the ROS wiring, not real-world behaviour.
+name: sim-smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: sim-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sim-smoke:
+    runs-on: ubuntu-24.04
+    container:
+      image: ros:jazzy-ros-base
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Software OpenGL so Gazebo's lidar renders without a GPU or display.
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-colcon-common-extensions libegl1 libgl1-mesa-dri libegl-mesa0
+          rosdep update --rosdistro jazzy
+          rosdep install --from-paths robot_ws/src --ignore-src -y --rosdistro jazzy
+
+      - name: colcon build
+        working-directory: robot_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --event-handlers console_cohesion+
+
+      - name: Run Gazebo smoke tests (one retry for simulator flakiness)
+        working-directory: robot_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          run() {
+            colcon test --packages-select orion_sim_tests --event-handlers console_direct+ \
+              && colcon test-result --verbose
+          }
+          run || { echo "::warning::sim-smoke failed once; retrying"; run; }
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-smoke-logs
+          path: |
+            robot_ws/log
+            robot_ws/build/orion_sim_tests/test_results
