@@ -50,8 +50,32 @@ def generate_launch_description():
        ],
     )    
 
+    lifecycle_manager = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="lifecycle_manager_slam",
+        output="screen",
+        parameters=[{
+            "use_sim_time": True,
+            "autostart": True,
+            "node_names": ["slam_toolbox"],
+        }],
+    )
+
+    Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="lifecycle_manager_slam",
+        parameters=[{
+            "use_sim_time": True,
+            "autostart": True,
+            "node_names": ["slam_toolbox"]
+        }],
+        output="screen",
+    )
 
     return LaunchDescription([
         gazebo_launch,
         slam,
+	lifecycle_manager,
     ])

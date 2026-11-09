@@ -1,0 +1,55 @@
+# Build, unit-test and lint every ROS 2 package on every push and pull request.
+# "Pushed" only counts as done when this workflow is green.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    container:
+      image: ros:jazzy-ros-base
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies with rosdep
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3-colcon-common-extensions
+          rosdep update --rosdistro jazzy
+          rosdep install --from-paths robot_ws/src --ignore-src -y --rosdistro jazzy
+
+      - name: colcon build
+        working-directory: robot_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: colcon test (unit tests + ament lint)
+        working-directory: robot_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon test --event-handlers console_cohesion+ \
+            --packages-skip orion_sim_tests
+          colcon test-result --verbose
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-test-logs
+          path: |
+            robot_ws/log
+            robot_ws/build/*/test_results

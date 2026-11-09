@@ -74,6 +74,11 @@ global_costmap:
 
     ros__parameters:
 
+      static_layer:
+        plugin: nav2_costmap_2d::StaticLayer
+        map_topic: /map
+        map_subscribe_transient_local: true
+
       use_sim_time: true
 
       global_frame: map
@@ -103,9 +108,8 @@ global_costmap:
 
       static_layer:
         plugin: nav2_costmap_2d::StaticLayer
-
+        map_topic: /map
         map_subscribe_transient_local: true
-
 ###############################################################
 # OBSTACLE LAYER
 ###############################################################
@@ -355,7 +359,6 @@ lifecycle_manager_navigation:
       - controller_server
       - behavior_server
       - bt_navigator
-
 
 ###############################################################
 # LIFECYCLE MANAGER (LOCALIZATION)
