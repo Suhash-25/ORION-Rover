@@ -207,3 +207,23 @@ official ROS apt servers are blocked there. CI on GitHub uses the official apt p
   - learning: 99 passed.
   - robot_ws: 493 tests, 0 failures, including all 4 Gazebo tests.
   - Smoke training: 37 s.
+
+### 14:10 Final code gaps closed (D-013)
+- The user asked to finish the coding job and to write kid-level hardware steps.
+- Merged claude/final-gaps into claude/integration:
+  - The drive-train launch args now reach xacro.
+  - Added a udev rule example. The serial number is still a placeholder.
+  - ESTOP_CLEAR is sent only after orion_safety accepts the reset.
+  - A controller give-up now ends the trial ENTRAPPED.
+  - New ONNX-in-Gazebo test.
+  - 100 Hz rate asserts.
+  - WheelPerturbation hook, off by default.
+- Results:
+  - robot_ws: 529 tests, 0 failures, 14 skipped.
+  - learning: 101 passed.
+- The hardware guide is the Claude Doc "ORION hardware integration guide".
+- Still blocked:
+  - The firmware board build. The PlatformIO registry returns 403 in the sandbox, and CI
+    firmware.yml covers it.
+  - The kill test needs the real rover.
+  - The constants need the parts list.
