@@ -30,5 +30,18 @@ def test_smoke_training_all_stages(tmp_path):
         assert json.loads((d / 'manifest.json').read_text())['controller'] == controller
     with open(run_dir / 'eval_summary.csv') as f:
         ev = list(csv.DictReader(f))
-    assert len(ev) == 4 * 4 * 2          # controllers x cells x gravities
+    assert len(ev) == 4 * 5 * 2          # controllers x (4 cells + SPEC) x gravities
     assert all(math.isfinite(float(r['effective_speed_mean'])) for r in ev)
+    # Council B1: the PPO stages log the curriculum threshold and the B0-completable
+    # fraction every iteration, and the summary checks it against the pre-registered band.
+    for stage in ('teacher', 'b2'):
+        logged = {r['metric'] for r in rows if r['stage'] == stage}
+        assert {'dp_threshold', 'b0_completable'} <= logged
+    thresholds = [float(r['value']) for r in rows
+                  if r['stage'] == 'teacher' and r['metric'] == 'dp_threshold']
+    assert thresholds[0] == 0.08 and thresholds[-1] == 0.0
+    summary = json.loads((run_dir / 'summary.json').read_text())
+    assert summary['b0_completable_teacher']['band'] == [0.4, 0.6]
+    # Council M9: the student and critic data were collected through the critic gate.
+    assert any(r['metric'] == 'frac_escape' for r in rows if r['stage'] == 'student')
+    assert 'visit_frac_escape' in summary['critic']

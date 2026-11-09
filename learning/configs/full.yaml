@@ -1,9 +1,16 @@
 # Full training run (do not run in CI). Sizes for a 16-32 vCPU cloud box; see README.md for
-# the compute estimate. Env settings are the SPEC section 6 training distribution.
+# the compute estimate. Env = the B1 training distribution; evaluation = SPEC section 6.
 name: full
 seed: 0
 torch_threads: 4
-env: {}
+env: {}                      # EnvConfig overrides; {} = training distribution (env.py, B1)
+# Training distribution (council B1): rejection threshold on peak steady DP/W annealed from
+# env.dp_threshold[0] = 0.08 to [1] = 0.0 over this fraction of each PPO stage.
+dp_curriculum_fraction: 0.3333
+# Pre-registered target: fraction of training episodes B0 completes (logged every PPO
+# iteration as b0_completable by a shadow B0 rollout; summary.json says if the mean is in).
+b0_completable_band: [0.4, 0.6]
+b0_monitor: {num_envs: 32, steps_per_iter: 256, window: 256}
 
 teacher:                       # ~200 M env steps
   num_envs: 512

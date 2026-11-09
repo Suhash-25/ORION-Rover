@@ -11,11 +11,20 @@ Stages (run in this order, or a subset with --stages):
 Every run writes runs/<timestamp>/ with config.yaml, run_info.json (seed, git SHA, stages),
 metrics.csv (stage, iteration, metric, value), checkpoints and the outputs of export and
 evaluate. --run-dir continues an existing run (e.g. run only `critic` on a trained student).
+
+Training distribution (council B1, env.EnvConfig): the PPO stages anneal the rejection
+threshold env.dp_threshold from its start to its end value over the first
+dp_curriculum_fraction of their iterations; student and critic use the end value. Every PPO
+iteration also logs b0_completable, the fraction of episodes of the current training
+distribution that B0 completes (shadow B0 rollouts, b0_monitor), and summary.json compares
+its mean with the pre-registered band b0_completable_band (40-60 %). Evaluation uses the SPEC
+section 6 distribution (env.spec_eval_config) as the base of the sandbox cells.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import csv
 from dataclasses import fields, replace
 import datetime as dt
@@ -30,6 +39,7 @@ import torch
 import yaml
 
 from orion_learning import env as E
+from orion_learning.baselines import B0Controller
 from orion_learning.checkpoints import (FILES, load_actor_critic, load_adapter,
                                         save_actor_critic, save_module)
 from orion_learning.evaluate import evaluate
@@ -39,6 +49,8 @@ from orion_learning.risk import CriticConfig, train_critic
 from orion_learning.student import StudentConfig, train_student
 
 STAGES = ('teacher', 'student', 'critic', 'b2', 'export', 'evaluate')
+DEFAULT_CURRICULUM_FRACTION = 1.0 / 3.0
+DEFAULT_B0_BAND = (0.4, 0.6)       # pre-registered B0-completable band (README)
 
 
 def _tuplify(v):
@@ -50,8 +62,9 @@ def env_config_from(d: dict | None) -> E.EnvConfig:
     cfg = E.EnvConfig()
     d = dict(d or {})
     for key in ('soil', 'patch_soil'):
-        if key in d:
-            d[key] = replace(getattr(cfg, key), **{k: _tuplify(v) for k, v in d[key].items()})
+        if d.get(key) is not None:
+            base = getattr(cfg, key) or E.SoilRanges()
+            d[key] = replace(base, **{k: _tuplify(v) for k, v in d[key].items()})
     unknown = set(d) - {f.name for f in fields(E.EnvConfig)}
     if unknown:
         raise KeyError(f'unknown env config keys: {sorted(unknown)}')
@@ -92,6 +105,62 @@ class MetricsLog:
         self.f.close()
 
 
+class B0CompletableMonitor:
+    """Fraction of training episodes that B0 completes, estimated alongside PPO (council B1).
+
+    A shadow env with the training config, held at the trainer's point of the curriculum,
+    is driven by B0 for steps_per_iter steps per training iteration (auto-reset); the
+    estimate is the success rate over the last `window` finished shadow episodes.
+    """
+
+    def __init__(self, env_cfg: E.EnvConfig, num_envs: int = 32, steps_per_iter: int = 256,
+                 window: int = 256, seed: int = 0):
+        self.env = E.OrionEnv(num_envs, env_cfg, seed=seed)
+        self.obs, _ = self.env.reset()
+        self.b0 = B0Controller(num_envs)
+        self.steps = steps_per_iter
+        self.outcomes: deque = deque(maxlen=window)
+        self.history: list[float] = []
+
+    def update(self, trainer_env_steps: int) -> dict:
+        """Advance the shadow rollouts; return {'dp_threshold', 'b0_completable'?}."""
+        for _ in range(self.steps):
+            self.env.env_steps = trainer_env_steps      # sample at the trainer's curriculum
+            self.obs, _, term, trunc, info = self.env.step(self.b0.act(self.obs))
+            done = term | trunc
+            if done.any():
+                self.outcomes.extend(info['success'][done].tolist())
+                self.b0.reset(done)
+        out = {'dp_threshold': self.env.config.dp_threshold_at(trainer_env_steps)}
+        if self.outcomes:
+            out['b0_completable'] = float(np.mean(self.outcomes))
+            self.history.append(out['b0_completable'])
+        return out
+
+
+def ppo_stage(cfg: dict, env_cfg: E.EnvConfig, pc: PPOConfig, seed: int, use_latent: bool,
+              log, summary: dict, name: str):
+    """Train one PPO stage with the DP/W curriculum and the B0-completable monitor."""
+    frac = float(cfg.get('dp_curriculum_fraction', DEFAULT_CURRICULUM_FRACTION))
+    stage_env = replace(env_cfg, dp_curriculum_steps=int(round(
+        frac * pc.iterations * pc.rollout_steps)))
+    monitor = B0CompletableMonitor(stage_env, seed=seed + 7, **(cfg.get('b0_monitor') or {}))
+
+    def log_with_monitor(it: int, metrics: dict) -> None:
+        # Threshold in effect while this iteration collected its rollout (it started then).
+        log(it, {**monitor.update(it * pc.rollout_steps), **metrics})
+
+    ac = train_ppo(stage_env, pc, seed, use_latent=use_latent, log=log_with_monitor)
+    band = tuple(float(b) for b in cfg.get('b0_completable_band', DEFAULT_B0_BAND))
+    mean = float(np.mean(monitor.history)) if monitor.history else float('nan')
+    in_band = bool(band[0] <= mean <= band[1])
+    summary[f'b0_completable_{name}'] = {'mean': mean, 'band': list(band), 'in_band': in_band}
+    if not in_band:
+        print(f'warning: {name} B0-completable fraction {mean:.2f} is outside the '
+              f'pre-registered band {band}')
+    return ac
+
+
 def new_run_dir(root: Path) -> Path:
     stamp = dt.datetime.now().strftime('%Y%m%d-%H%M%S')
     path = root / stamp
@@ -111,6 +180,7 @@ def run(config_path: Path, stages=STAGES, run_dir: Path | None = None,
     np.random.seed(seed)
     torch.manual_seed(seed)
     env_cfg = env_config_from(cfg.get('env'))
+    final_env_cfg = replace(env_cfg, dp_curriculum_steps=0)   # end of the curriculum
     if run_dir is None:
         run_dir = new_run_dir(Path(runs_root))
     run_dir = Path(run_dir)
@@ -126,24 +196,27 @@ def run(config_path: Path, stages=STAGES, run_dir: Path | None = None,
     try:
         if 'teacher' in stages:
             pc = dataclass_from(PPOConfig, cfg.get('teacher'))
-            ac = train_ppo(env_cfg, pc, seed, use_latent=True, log=log.logger('teacher'))
+            ac = ppo_stage(cfg, env_cfg, pc, seed, True, log.logger('teacher'), summary,
+                           'teacher')
             save_actor_critic(run_dir / FILES['teacher'], ac, pc)
         if 'student' in stages:
             sc = dataclass_from(StudentConfig, cfg.get('student'))
             teacher = load_actor_critic(run_dir / FILES['teacher'])
-            adapter = train_student(teacher, env_cfg, sc, seed + 1, log.logger('student'))
+            adapter = train_student(teacher, final_env_cfg, sc, seed + 1,
+                                    log.logger('student'))
             save_module(run_dir / FILES['student'], adapter, channels=sc.channels)
         if 'critic' in stages:
             cc = dataclass_from(CriticConfig, cfg.get('critic'))
             teacher = load_actor_critic(run_dir / FILES['teacher'])
             adapter = load_adapter(run_dir / FILES['student'])
-            critic, report = train_critic(teacher, adapter, env_cfg, cc, seed + 2,
+            critic, report = train_critic(teacher, adapter, final_env_cfg, cc, seed + 2,
                                           log.logger('critic'))
             save_module(run_dir / FILES['critic'], critic, hidden=list(cc.hidden))
             summary['critic'] = report
         if 'b2' in stages:
             pc = dataclass_from(PPOConfig, cfg.get('b2'))
-            ac = train_ppo(env_cfg, pc, seed + 3, use_latent=False, log=log.logger('b2'))
+            ac = ppo_stage(cfg, env_cfg, pc, seed + 3, False, log.logger('b2'), summary,
+                           'b2')
             save_actor_critic(run_dir / FILES['B2'], ac, pc)
         if 'export' in stages:
             for controller in ('student', 'B2'):
@@ -155,7 +228,8 @@ def run(config_path: Path, stages=STAGES, run_dir: Path | None = None,
             ev = dict(cfg.get('evaluate') or {})
             rows = evaluate(ev.get('controllers', ['B0', 'B2', 'student', 'student+critic']),
                             int(ev.get('trials', 25)), run_dir, run_dir,
-                            seed=int(ev.get('seed', 12345)), base=env_cfg)
+                            seed=int(ev.get('seed', 12345)),
+                            base=E.spec_eval_config(final_env_cfg))
             summary['evaluate'] = rows
     finally:
         log.close()
