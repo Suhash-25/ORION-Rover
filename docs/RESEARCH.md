@@ -57,7 +57,7 @@ ORION is a four-wheel skid-steer research rover (ROS 2 Jazzy, Gazebo Harmonic, `
 1. **Hardware list is still unknown.** Most important: can motor current be logged at ≥50 Hz? Can encoders and the IMU be logged at ≥100 Hz? The first decides H3 and probing. The second decides tipping-point sensing.
 2. **Novelty is not proven.** It rests on targeted searches, not a systematic review. Phase 0 week 1 is the review.
 3. **Paper TODOs:** author email, acknowledgment, JPL citation for Opportunity at "Purgatory", hardware [TBD] values in Table II, and the four new prior-art papers in Part 2C.
-4. **Trial count mismatch** between the paper and SPEC.md (Part 2B).
+4. ~~Trial count mismatch~~ resolved: two-stage H1 design (Part 2B).
 
 ## 0.6 Project history (how the concept evolved)
 
@@ -497,7 +497,7 @@ Soil changes within a run are produced spatially: the route crosses from a compa
 
 ### Sample Size
 
-With four cells, five primary methods (Section 7) and a target of 20 runs per method per cell, the full study needs about 400 runs. At an estimated 10 minutes per run including bed preparation, this is about 67 hours of bin time. For H1, the planned comparison is between trap rates in cells C and D for a controller tuned in C. If the true trap rates are, for example, 10% and 40%, an exact calculation for a two-sided Fisher exact test at $\alpha = 0.05$ gives a power of about 0.49 with 20 runs per cell, 0.71 with 30 and 0.85 with 40. Twenty runs per cell is therefore under-powered for an effect of this size. For the H1 comparison we plan 40 runs in each of cells C and D, which adds 40 runs, about 7 hours of bin time. These trap rates are illustrative assumptions, not predictions, and the sample size will be revisited after the Phase 0 pilot.
+With four cells, five primary methods (Section 7) and a target of 20 runs per method per cell, the full study needs about 400 runs. At an estimated 10 minutes per run including bed preparation, this is about 67 hours of bin time. For H1, the planned comparison is between trap rates in cells C and D for a controller tuned in C. If the true trap rates are, for example, 10% and 40%, an exact calculation for a two-sided Fisher exact test at $\alpha = 0.05$ gives a power of about 0.49 with 20 runs per cell, 0.71 with 30 and 0.85 with 40. Twenty runs per cell is therefore under-powered for an effect of this size. For the H1 comparison we plan 40 runs in each of cells C and D, which adds 40 runs, about 7 hours of bin time. H1 is therefore tested in two pre-registered stages. Stage 1 is the Phase 0 pilot with 20 runs in each of the four cells; an early GO is declared only if the C–D difference is significant at $\alpha = 0.01$. Otherwise, stage 2 extends cells C and D to 40 runs each and tests at $\alpha = 0.04$, which keeps the overall false-positive rate at or below 0.05. A NO-GO is declared only after stage 2. These trap rates are illustrative assumptions, not predictions.
 
 ### Safety
 
@@ -1039,10 +1039,10 @@ The Phase 0 gate decides between the Earth-test-bias framing and the self-rescue
 |---|---|---|
 | Margin | "Recoverability margin" m_c(s): probability that an escape behavior succeeds | **"Entrapment risk"**: probability the rover gets stuck in the next 10 s. Reason: nothing on the real rover can label whether an escape *would have* worked, so the quantity is learned in simulation only, and on hardware only its predictions are checked |
 | Simulator errors | g_s-dependent soil surrogate fitted to Tier 2 | The simulator **randomizes its own model errors**, including how gravity affects soil strength, so training on an Earth-based soil model does not reproduce the bias |
-| Kill test size | H1 pilot 20 runs/cell (Table IX); main H1 test 40 runs in each of cells C and D (power ≈ 0.85) | **Reconciled (D-008):** two-stage pre-registered design. Stage 1 = Phase 0 pilot, 4 setups × 20 runs; early GO only at α = 0.01. Stage 2 = extend light-packed (C) and light-loose (D) to 40 runs each; final H1 test at α = 0.04. NO-GO only after stage 2 |
+| Kill test size | Two-stage H1 test (§6 Sample Size, Table IX) | Same two-stage design: stage 1 = 4 setups × 20 runs, early GO only at α = 0.01; stage 2 = cells C and D extended to 40 runs each, tested at α = 0.04; NO-GO only after stage 2 (SPEC §8, DECISIONS D-008) |
 | Ground truth | Overhead camera | Overhead camera + **AprilTag** (approved). Without it, speed accuracy is only about 2–5 cm/s |
 
-**Reconciled 2026-11-09 (DECISIONS.md D-008):** the paper's power argument is right: 20 runs per cell gives about 49% power for 10% vs 40% trap rates, so a 20-run NO-GO would be weak evidence. SPEC.md now uses the two-stage design above. Paper and SPEC agree on 40 runs in cells C and D for the H1 test.
+**Resolved (2026-11-09):** the trial-count mismatch is settled by the two-stage design above, in both the paper and SPEC.md.
 
 ## C. Prior art found after the paper was written (add to Section 2)
 
