@@ -1,0 +1,263 @@
+{
+  "project": "ORION-Rover",
+  "last_updated": "2026-11-09",
+  "rules": {
+    "single_active_feature": true,
+    "passing_requires_evidence": true,
+    "do_not_skip_verification": true
+  },
+  "status_legend": {
+    "not_started": "Work has not begun or has not been verified on this machine.",
+    "in_progress": "The feature is the current active task (only one at a time).",
+    "blocked": "Work cannot continue until a documented blocker is resolved.",
+    "passing": "Required verification has passed and evidence is recorded by hx verify."
+  },
+  "features": [
+    {
+      "id": "ci-pipeline",
+      "priority": 1,
+      "area": "infra",
+      "title": "GitHub Actions build, test, lint and Gazebo smoke tests",
+      "user_visible_behavior": "Every push shows green/red checks for build, unit tests, lint and simulation",
+      "scope": [
+        ".github/workflows/**",
+        "scripts/verify.sh"
+      ],
+      "dependsOn": [],
+      "verification": [
+        {
+          "level": "static",
+          "cmd": "bash -n scripts/verify.sh"
+        },
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh unit"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 0. Real status comes from GitHub Actions on the pushed branch."
+    },
+    {
+      "id": "stack-builds-and-drives",
+      "priority": 2,
+      "area": "simulation",
+      "title": "Robot spawns headless, controllers active, drives on command",
+      "user_visible_behavior": "0.3 m/s command moves odom > 0.5 m in 4 s; lidar > 5 Hz; IMU reads gravity; TF chain resolves",
+      "scope": [
+        "robot_ws/src/orion_description/**",
+        "robot_ws/src/orion_control/**",
+        "robot_ws/src/orion_bringup/**",
+        "robot_ws/src/orion_sim_tests/**"
+      ],
+      "dependsOn": [
+        "ci-pipeline"
+      ],
+      "verification": [
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh unit orion_description orion_control orion_bringup"
+        },
+        {
+          "level": "integration",
+          "cmd": "scripts/verify.sh sim -R drive"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 1. Sandbox evidence 2026-11-09: test_drive.py 6/6 pass."
+    },
+    {
+      "id": "nav2-reaches-goal",
+      "priority": 3,
+      "area": "navigation",
+      "title": "Nav2 localizes on the saved map and drives to a goal",
+      "user_visible_behavior": "NavigateToPose to (1.5, 0) in mapping_world succeeds within 150 s",
+      "scope": [
+        "robot_ws/src/orion_bringup/config/nav2_params.yaml",
+        "robot_ws/src/orion_bringup/launch/**"
+      ],
+      "dependsOn": [
+        "stack-builds-and-drives"
+      ],
+      "verification": [
+        {
+          "level": "integration",
+          "cmd": "scripts/verify.sh sim -R nav"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 1. Sandbox evidence 2026-11-09: goal reached in 12.6 s; fails with old unstamped config (negative control)."
+    },
+    {
+      "id": "interfaces-and-safety",
+      "priority": 4,
+      "area": "safety",
+      "title": "orion_msgs, twist_mux priorities, orion_safety node",
+      "user_visible_behavior": "E-stop zeroes wheel velocity within 0.5 s even while the policy publishes; tilt/current/heartbeat rules stop the rover",
+      "scope": [
+        "robot_ws/src/orion_msgs/**",
+        "robot_ws/src/orion_safety/**",
+        "robot_ws/src/orion_control/config/twist_mux.yaml",
+        "docs/INTERFACES.md"
+      ],
+      "dependsOn": [
+        "stack-builds-and-drives"
+      ],
+      "verification": [
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh unit orion_msgs orion_safety"
+        },
+        {
+          "level": "integration",
+          "cmd": "scripts/verify.sh sim -R safety"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 2."
+    },
+    {
+      "id": "real-rover-driver",
+      "priority": 5,
+      "area": "hardware",
+      "title": "orion_hardware ros2_control plugin + firmware",
+      "user_visible_behavior": "use_sim:=false drives the real motors over serial; watchdog stops motors 200 ms after the link drops",
+      "scope": [
+        "robot_ws/src/orion_hardware/**",
+        "firmware/**",
+        "docs/BRINGUP.md"
+      ],
+      "dependsOn": [
+        "interfaces-and-safety"
+      ],
+      "verification": [
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh unit orion_hardware"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 3. BLOCKED (human): hardware list unknown. Real-rover bring-up checklist in docs/BRINGUP.md can only be signed off on the rover."
+    },
+    {
+      "id": "terrain-and-logging",
+      "priority": 6,
+      "area": "sensing",
+      "title": "orion_terrain slip/sinkage estimation + orion_experiments trial logging",
+      "user_visible_behavior": "/orion/terrain_state published at control rate; every trial writes a rosbag + metadata with git SHA",
+      "scope": [
+        "robot_ws/src/orion_terrain/**",
+        "robot_ws/src/orion_experiments/**"
+      ],
+      "dependsOn": [
+        "interfaces-and-safety"
+      ],
+      "verification": [
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh unit orion_terrain orion_experiments"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 4."
+    },
+    {
+      "id": "baseline-controller",
+      "priority": 7,
+      "area": "control",
+      "title": "Non-RL baseline controller for the Phase 0 kill test",
+      "user_visible_behavior": "Baseline drives through the policy mux slot and respects safety; tunable from YAML",
+      "scope": [
+        "robot_ws/src/orion_policy/**"
+      ],
+      "dependsOn": [
+        "terrain-and-logging"
+      ],
+      "verification": [
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh unit orion_policy"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 5."
+    },
+    {
+      "id": "phase0-kill-test",
+      "priority": 8,
+      "area": "experiment",
+      "title": "2x2 ballast x sand kill test and go/no-go analysis",
+      "user_visible_behavior": "Analysis script outputs GO / NO-GO with effect size and p-value from trial CSVs",
+      "scope": [
+        "robot_ws/src/orion_experiments/**"
+      ],
+      "dependsOn": [
+        "baseline-controller"
+      ],
+      "verification": [
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh unit orion_experiments"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 6. BLOCKED (human): needs real sandbox runs."
+    },
+    {
+      "id": "learning-stack",
+      "priority": 9,
+      "area": "learning",
+      "title": "Soil env, PPO + RMA teacher/student, recoverability critic, ONNX export",
+      "user_visible_behavior": "Smoke training finishes, rewards finite, exported policy loads in orion_policy with matching obs layout",
+      "scope": [
+        "learning/**"
+      ],
+      "dependsOn": [
+        "ci-pipeline"
+      ],
+      "verification": [
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh learning"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 7."
+    },
+    {
+      "id": "orion-policy-runtime",
+      "priority": 10,
+      "area": "learning",
+      "title": "ONNX policy runtime, margin, probe and escape behaviours",
+      "user_visible_behavior": "Policy drives 10 s in Gazebo without tripping safety; margin stays in [0, 1]",
+      "scope": [
+        "robot_ws/src/orion_policy/**"
+      ],
+      "dependsOn": [
+        "learning-stack",
+        "baseline-controller"
+      ],
+      "verification": [
+        {
+          "level": "unit",
+          "cmd": "scripts/verify.sh unit orion_policy"
+        },
+        {
+          "level": "integration",
+          "cmd": "scripts/verify.sh sim -R policy"
+        }
+      ],
+      "status": "not_started",
+      "evidence": [],
+      "notes": "PR 8."
+    }
+  ]
+}
