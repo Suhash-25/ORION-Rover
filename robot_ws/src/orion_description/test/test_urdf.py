@@ -52,3 +52,8 @@ def test_ros2_control_exposes_velocity_command_and_effort_state(urdf):
 def test_lidar_frame_exists(urdf):
     root = ET.parse(urdf).getroot()
     assert 'lidar_link' in {link.get('name') for link in root.findall('link')}
+
+
+def test_imu_frame_exists(urdf):
+    root = ET.parse(urdf).getroot()
+    assert 'imu_link' in {link.get('name') for link in root.findall('link')}

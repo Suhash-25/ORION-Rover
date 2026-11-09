@@ -17,7 +17,8 @@
     <xacro:include filename="../links/chassis.xacro"/>
     <xacro:include filename="../links/mast.xacro"/>
     <xacro:include filename="../links/wheel.xacro"/>
-    <xacro:include filename="../sensors/lidar.xacro"/>    
+    <xacro:include filename="../sensors/lidar.xacro"/>
+    <xacro:include filename="../sensors/imu.xacro"/>
 
     <!-- ROS2 Control -->
     <xacro:include filename="../control/ros2_control.xacro"/>
@@ -36,6 +37,9 @@
 
     <xacro:orion_lidar
     parent_link="sensor_mast_link"/>
+
+    <!-- IMU: needed for tilt safety and slip estimation -->
+    <xacro:orion_imu parent_link="base_link"/>
 
     <!-- ================= Front Left Wheel ================= -->
 

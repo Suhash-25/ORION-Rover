@@ -29,6 +29,10 @@
       filename="gz-sim-scene-broadcaster-system"
       name="gz::sim::systems::SceneBroadcaster"/>
 
+    <plugin
+      filename="gz-sim-imu-system"
+      name="gz::sim::systems::Imu"/>
+
     <!-- ⭐ This is the important one ⭐ -->
 
     <plugin

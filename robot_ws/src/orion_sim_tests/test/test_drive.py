@@ -16,6 +16,7 @@ import launch_testing.markers
 from nav_msgs.msg import Odometry
 import pytest
 import rclpy
+from sensor_msgs.msg import Imu
 from sensor_msgs.msg import JointState
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer
@@ -46,6 +47,7 @@ class TestDrive(unittest.TestCase):
         cls.node.watch(JointState, '/joint_states')
         cls.node.watch(Odometry, ODOM_TOPIC)
         cls.node.watch(LaserScan, '/scan', sensor_qos=True)
+        cls.node.watch(Imu, '/imu/data', sensor_qos=True)
         cls.cmd_pub = cls.node.create_publisher(TwistStamped, CMD_TOPIC, 10)
         cls.tf_buffer = Buffer()
         cls.tf_listener = TransformListener(cls.tf_buffer, cls.node)
@@ -71,6 +73,13 @@ class TestDrive(unittest.TestCase):
         self.node.spin_for(5.0)
         rate = (self.node.counts.get('/scan', 0) - start) / (time.monotonic() - t0)
         self.assertGreater(rate, 5.0, f'/scan at {rate:.1f} Hz')
+
+    def test_2b_imu_reports_gravity(self):
+        self.assertTrue(self.node.spin_until(lambda: '/imu/data' in self.node.latest, 60),
+                        '/imu/data never published')
+        acc = self.node.latest['/imu/data'].linear_acceleration
+        self.assertAlmostEqual(acc.z, 9.8, delta=0.5, msg=f'IMU z accel {acc.z:.2f} at rest')
+        self.assertEqual(self.node.latest['/imu/data'].header.frame_id, 'imu_link')
 
     def test_3_tf_chain(self):
         def has_tf():
