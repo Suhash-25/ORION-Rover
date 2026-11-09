@@ -34,9 +34,9 @@
           "cmd": "scripts/verify.sh unit"
         }
       ],
-      "status": "not_started",
+      "status": "blocked",
       "evidence": [],
-      "notes": "PR 0. Real status comes from GitHub Actions on the pushed branch."
+      "notes": "PR 0. Real status comes from GitHub Actions on the pushed branch. Local equivalents pass; blocked until GitHub Actions runs on the pushed PR branches (sections 2-4)."
     },
     {
       "id": "stack-builds-and-drives",
@@ -63,8 +63,21 @@
           "cmd": "scripts/verify.sh sim -R drive"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
+      "status": "passing",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh unit orion_description orion_control orion_bringup: exit 0"
+        },
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh sim -R drive: exit 0 (6 assertions)"
+        }
+      ],
       "notes": "PR 1. Sandbox evidence 2026-11-09: test_drive.py 6/6 pass."
     },
     {
@@ -86,8 +99,15 @@
           "cmd": "scripts/verify.sh sim -R nav"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
+      "status": "passing",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh sim -R nav: exit 0 (negative control earlier: old config 1.49 m from goal)"
+        }
+      ],
       "notes": "PR 1. Sandbox evidence 2026-11-09: goal reached in 12.6 s; fails with old unstamped config (negative control)."
     },
     {
@@ -115,8 +135,21 @@
           "cmd": "scripts/verify.sh sim -R safety"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
+      "status": "passing",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh unit orion_msgs orion_safety: exit 0"
+        },
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh sim -R safety: exit 0"
+        }
+      ],
       "notes": "PR 2."
     },
     {
@@ -139,9 +172,16 @@
           "cmd": "scripts/verify.sh unit orion_hardware"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
-      "notes": "PR 3. BLOCKED (human): hardware list unknown. Real-rover bring-up checklist in docs/BRINGUP.md can only be signed off on the rover."
+      "status": "passing",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh unit orion_hardware: exit 0 (fake-firmware serial integration test; firmware CMake host tests pass)"
+        }
+      ],
+      "notes": "PR 3. BLOCKED (human): hardware list unknown. Real-rover bring-up checklist in docs/BRINGUP.md can only be signed off on the rover. Unit/integration against fake firmware only; PlatformIO board build and real motors unverified."
     },
     {
       "id": "terrain-and-logging",
@@ -162,8 +202,15 @@
           "cmd": "scripts/verify.sh unit orion_terrain orion_experiments"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
+      "status": "passing",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh unit orion_terrain orion_experiments: exit 0 (incl. golden replay vs learning env)"
+        }
+      ],
       "notes": "PR 4."
     },
     {
@@ -184,8 +231,15 @@
           "cmd": "scripts/verify.sh unit orion_policy"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
+      "status": "passing",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh unit orion_policy: exit 0 (B0 parity with learning B0)"
+        }
+      ],
       "notes": "PR 5."
     },
     {
@@ -206,9 +260,16 @@
           "cmd": "scripts/verify.sh unit orion_experiments"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
-      "notes": "PR 6. BLOCKED (human): needs real sandbox runs."
+      "status": "blocked",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh unit orion_experiments: exit 0 (analysis, two-stage rule, power simulation)"
+        }
+      ],
+      "notes": "PR 6. BLOCKED (human): needs real sandbox runs. Software verified; the kill test itself is BLOCKED on real hardware runs (stage 1: 4 x 20 trials)."
     },
     {
       "id": "learning-stack",
@@ -228,8 +289,15 @@
           "cmd": "scripts/verify.sh learning"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
+      "status": "passing",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh learning: exit 0 (99 passed; smoke training 36 s, ONNX parity < 3e-7)"
+        }
+      ],
       "notes": "PR 7."
     },
     {
@@ -255,8 +323,21 @@
           "cmd": "scripts/verify.sh sim -R policy"
         }
       ],
-      "status": "not_started",
-      "evidence": [],
+      "status": "passing",
+      "evidence": [
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh unit orion_policy: exit 0"
+        },
+        {
+          "date": "2026-11-09",
+          "commit": "dc9a622",
+          "env": "sandbox: RoboStack ROS 2 Jazzy + Gazebo Harmonic, ORION_OFFLINE=1 (xmllint skipped)",
+          "result": "verify.sh sim -R policy: exit 0"
+        }
+      ],
       "notes": "PR 8."
     }
   ]
