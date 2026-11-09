@@ -1,27 +1,42 @@
 """Entrapment-risk critic (SPEC F1): branched-rollout labels, BCE training, calibration.
 
-rho = P(hard-stuck or belly-out within T_h = 10 s | obs, history, under the escape library E).
-Label of a visited state: clone the env state, run E from it in K = 4 branches for T_h
-(branch b starts E at manoeuvre b and gets its own sensor-noise stream), label = fraction of
-branches whose first terminal event is belly-out or hard-stuck. The critic sees (obs, z-hat)
-only, is trained with BCE on these soft labels, then temperature-scaled on a held-out
-calibration split; ECE and Brier score are reported on a separate held-out test split.
+rho(t) = P(an entrapment begins within T_h = 10 s of t | obs, history, escape now). An
+entrapment is a belly-out (at the time it happens) or an orion_safety ENTRAPPED verdict,
+dated at the onset of the stuck episode that ended in it (council M2: the rover's analysis
+uses the same anchor, never the HALT time ~23 s after the wheels stop).
+
+Label of a visited state: clone the env state into K = 4 branches; branch b runs escape
+manoeuvre b of the library E at once, then B0 (cruise, slip governor, stuck -> next escape),
+with its own sensor-noise stream and no time limit, until its outcome for the deadline
+t + T_h is decided (at most T_h + 20 s ENTRAPPED window + LABEL_SLACK_S). Label = fraction
+of branches with an entrapment dated <= t + T_h. E-then-B0 rather than E back to back: the
+stuck rule only fires while the rover drives, so a branch that only plays E could never be
+ENTRAPPED.
+
+States are visited by the student acting through baselines.CriticGate (stuck -> escape,
+plus the SurrogateRisk probe / retreat / escape modes, council M9). The critic sees
+(obs, z-hat) only, is trained with BCE on these soft labels, then temperature-scaled on a
+held-out calibration split; ECE and Brier score are reported on a separate held-out test
+split.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 import numpy as np
 import torch
 
 from orion_learning import obs_spec as S
-from orion_learning.baselines import EscapeLibrary, twist_to_action
-from orion_learning.env import DT, EnvConfig, OrionEnv
+from orion_learning.baselines import B0Controller, CriticGate
+from orion_learning.env import DT, EnvConfig, HARD_STUCK_WINDOW_S, OrionEnv
 from orion_learning.history import History
 from orion_learning.nets import RiskCritic, TCNAdapter
 from orion_learning.ppo import ActorCritic
+from orion_learning.student import mode_fractions, SurrogateRisk
+
+LABEL_SLACK_S = 15.0    # s past onset + 20 s window for the ENTRAPPED verdict to come in
 
 
 @dataclass
@@ -39,44 +54,65 @@ class CriticConfig:
     lr: float = 1e-3
     hidden: list[int] = field(default_factory=lambda: [64, 64])
     ece_bins: int = 10
+    gate_p_active: float = 0.3    # SurrogateRisk of the visiting student (student.py)
+    gate_hold_s: tuple[float, float] = (0.5, 3.0)
 
 
 def branch_labels(env_cfg: EnvConfig, snapshot: dict, branches: int, horizon_s: float,
                   seed: int) -> np.ndarray:
-    """Fraction of K escape-library branches that end in entrapment, per rover in snapshot."""
+    """Fraction of K branches with an entrapment dated within horizon_s, per snapshot rover.
+
+    Branch b of a rover starts escape manoeuvre b now and then runs B0 (module docstring).
+    """
     n = next(iter(snapshot['arrays'].values())).shape[0]
-    env = OrionEnv(n * branches, env_cfg, seed=seed, auto_reset=False)
+    m = n * branches
+    # No time limit in the branches: the label is about the terrain, not the trial clock.
+    env = OrionEnv(m, replace(env_cfg, episode_s=1e6), seed=seed, auto_reset=False)
     env.restore_state(OrionEnv.tile_state(snapshot, branches))
     env.seed(seed)    # fresh noise streams: branches differ in sensor noise and dropouts
-    lib = EscapeLibrary(n * branches, start_index=np.tile(np.arange(branches), n))
-    failed = np.zeros(n * branches, dtype=bool)
-    ended = np.zeros(n * branches, dtype=bool)
-    for _ in range(int(round(horizon_s / DT))):
-        lib.start(~lib.active)               # E runs back to back for the whole horizon
-        v, w = lib.act()
-        _, _, term, _, info = env.step(twist_to_action(v, w))
-        fail = info['belly_out'] | info['hard_stuck']
-        failed |= fail & ~ended
+    deadline = env.state['t'] * DT + horizon_s + 1e-9
+    ctl = B0Controller(m, escape_start_index=np.tile(np.arange(branches), n))
+    ctl.escape.start(np.ones(m, dtype=bool))
+    # The first observation only feeds B0's governor and stuck timers, which the running
+    # escape overrides, so zeros stand in for the (unstored) snapshot observation.
+    obs = np.zeros((m, S.OBS_DIM), np.float32)
+    failed = np.zeros(m, dtype=bool)
+    ended = np.zeros(m, dtype=bool)
+    for _ in range(int(round((horizon_s + HARD_STUCK_WINDOW_S + LABEL_SLACK_S) / DT))):
+        obs, _, term, _, info = env.step(ctl.act(obs))
+        event = (info['belly_out'] | info['hard_stuck']) & ~ended
+        failed |= event & (info['entrapment_time'] <= deadline)
         ended |= term
-        if ended.all():
+        # Past the deadline only a stuck episode that began by then can still turn positive.
+        onset = info['stuck_onset']
+        pending = (onset >= 0.0) & (onset <= deadline)
+        if np.all(ended | ((info['episode_time'] > deadline) & ~pending)):
             break
     return failed.reshape(n, branches).mean(axis=1)
 
 
 def collect(teacher: ActorCritic, adapter: TCNAdapter, env_cfg: EnvConfig, cfg: CriticConfig,
-            seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run the student, snapshot visited states and label them. Returns (obs, z_hat, label)."""
+            seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Run the gated student, snapshot visited states and label them.
+
+    Returns (obs, z_hat, label, CriticGate mode fractions of the visiting rollout).
+    """
     env = OrionEnv(cfg.num_envs, env_cfg, seed=seed)
     obs, _ = env.reset()
     hist = History(cfg.num_envs)
+    gate = CriticGate(cfg.num_envs)
+    risk = SurrogateRisk(cfg.num_envs, cfg.gate_p_active, cfg.gate_hold_s,
+                         np.random.default_rng(seed))
     prev_action = np.zeros((cfg.num_envs, S.ACTION_DIM), np.float32)
     since_reset = np.zeros(cfg.num_envs, dtype=np.int64)
-    X, Z, Y = [], [], []
+    X, Z, Y, modes = [], [], [], []
     for t in range(cfg.rollout_steps):
         h = hist.push(obs, prev_action)
         with torch.no_grad():
             z_hat = adapter(torch.as_tensor(h))
             action = teacher.policy(torch.as_tensor(obs), z_hat).numpy()
+        action, mode = gate.gate(obs, action, risk())
+        modes.append(mode)
         if t % cfg.sample_every == 0:
             ok = since_reset >= cfg.warmup_steps
             if ok.any():
@@ -90,13 +126,16 @@ def collect(teacher: ActorCritic, adapter: TCNAdapter, env_cfg: EnvConfig, cfg: 
                 Y.append(y)
         obs, _, term, trunc, _ = env.step(action)
         done = term | trunc
-        prev_action = action.astype(np.float32)
+        prev_action = action.astype(np.float32)     # the gated action actually sent
         since_reset = np.where(done, 0, since_reset + 1)
         if done.any():
             hist.reset(done)
+            gate.reset(done)
+            risk.reset(done)
             prev_action[done] = 0.0
     cat = lambda xs, d: np.concatenate(xs) if xs else np.zeros((0,) + d, np.float32)  # noqa
-    return cat(X, (S.OBS_DIM,)), cat(Z, (S.LATENT_DIM,)), cat(Y, ())
+    return (cat(X, (S.OBS_DIM,)), cat(Z, (S.LATENT_DIM,)), cat(Y, ()),
+            mode_fractions(modes))
 
 
 def bce_soft(p, y, eps=1e-6) -> float:
@@ -141,6 +180,7 @@ def train_critic(teacher: ActorCritic, adapter: TCNAdapter, env_cfg: EnvConfig,
             for r in range(cfg.holdout_rounds)]
     X, Z, Y = (np.concatenate([p[i] for p in parts]) for i in range(3))
     Xh, Zh, Yh = (np.concatenate([p[i] for p in held]) for i in range(3))
+    visit_modes = {k: float(np.mean([p[3][k] for p in parts])) for k in parts[0][3]}
     half = len(Yh) // 2      # held-out seeds: first half calibrates T, second half is the test
     critic = RiskCritic(cfg.hidden)
     critic.obs_norm.load_state_dict(adapter.obs_norm.state_dict())
@@ -175,6 +215,7 @@ def train_critic(teacher: ActorCritic, adapter: TCNAdapter, env_cfg: EnvConfig,
         'ece': expected_calibration_error(p_cal, y_test, cfg.ece_bins),
         'brier_raw': brier(p_raw, y_test), 'brier': brier(p_cal, y_test),
         'brier_base_rate': brier(np.full(len(y_test), Y.mean() if len(Y) else 0.0), y_test),
+        **{f'visit_{k}': v for k, v in visit_modes.items()},
     }
     log(cfg.epochs, report)
     return critic, report
