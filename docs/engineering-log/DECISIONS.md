@@ -45,3 +45,4 @@ spec had 4 × 20. Options: (a) keep 4 × 20, (b) 40 in every cell (160 runs, too
 0), (c) two-stage. Chose (c): stage 1 pilot 4 × 20 with early GO only at α = 0.01; stage 2
 extends C and D to 40 each and tests at α = 0.04; NO-GO only after stage 2. Paper and SPEC now
 agree. orion_experiments analysis must implement the two looks.
+Approved by the user (suhas) at 12:01: "yes do it".

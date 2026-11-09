@@ -99,3 +99,7 @@ official ROS apt servers are blocked there. CI on GitHub uses the official apt p
 - Keep interfaces able to support it: wheel encoder and IMU logging at >= 100 Hz and a
   perturbation-injection hook in the motor command path. The detector itself is not built
   unless the user approves.
+
+### 12:01 User approved 40 runs in cells C and D (two-stage kill test, D-008)
+- SPEC §8, RESEARCH.md and the paper already match. Remaining: the phase-0 protocol YAML and
+  analysis.py in orion_experiments get the two-stage design during integration.
