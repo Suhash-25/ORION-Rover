@@ -4,6 +4,8 @@ import math
 import os
 
 from bag_fixture import write_trial
+import numpy as np
+from orion_experiments.analysis import entrapment_onset
 from orion_experiments.analysis import load_trials
 from orion_experiments.analysis import main
 from orion_experiments.protocol import load_protocol
@@ -17,8 +19,11 @@ CONFIG = os.path.join(os.path.dirname(__file__), '..', 'config')
 def trials_root(tmp_path_factory):
     root = str(tmp_path_factory.mktemp('trials'))
     write_trial(root, 'ok', outcome='SUCCESS', elapsed=20.0, speed=0.075)
-    write_trial(root, 'trapped', cell='light-loose', outcome='ENTRAPPED', elapsed=30.0,
-                speed=0.01, stuck=(5.0, 31.0), escape=None, risk=lambda t: t / 30.0)
+    # Drives 0.4 m by 8 s, then stands still; a short spurious FLAG_STUCK at 2-3 s while
+    # moving, the real stuck episode from 11 s, hard-stuck HALT at 34 s (11 + 3 + 20).
+    write_trial(root, 'trapped', cell='light-loose', outcome='ENTRAPPED', elapsed=34.0,
+                speed=0.05, stop_at=8.0, stuck=((2.0, 3.0), (11.0, 35.0)), hard_stuck_at=34.0,
+                escape=None, risk=lambda t: t / 34.0)
     write_trial(root, 'aborted', outcome='ABORT', elapsed=3.0)
     write_trial(root, 'bad_cone', cell='light-loose', outcome='TIMEOUT', elapsed=60.0,
                 cone=(10.0, 10.0, 10.0))
@@ -45,13 +50,44 @@ def test_metrics_of_a_successful_trial(trials_root):
 def test_metrics_of_an_entrapped_trial_and_calibration_labels(trials_root):
     df, samples = load_trials(trials_root)
     r = df.set_index('trial_id').loc['trapped']
-    assert r.entrapped and r.failure and r.time_to_entrapment_s == 30.0
-    assert r.effective_speed == pytest.approx(0.01 * 30.0 / 60.0, abs=1e-6)  # per 60 s
-    assert r.stuck_events == 1 and r.recovered_stuck_events == 0 and not r.recovery
+    assert r.entrapped and r.failure and r.time_to_entrapment_s == 34.0
+    assert r.effective_speed == pytest.approx(0.4 / 60.0, abs=1e-6)  # per 60 s
+    assert r.stuck_events == 2 and r.recovered_stuck_events == 1 and not r.recovery
     assert r.max_risk == pytest.approx(1.0)
+    # Council M2: labels count from the onset of the stuck episode that ended in the HALT
+    # (11 s), not from the HALT (34 s) and not from the earlier episode at 2 s.
+    assert r.entrapment_onset_s == pytest.approx(11.0) and r.onset_source == \
+        '/orion/ground_truth_pose'
     labels = [y for _, y in samples['B0']]
-    # 20 Hz over 30 s, label 1 in the last 10 s; the other trials have no critic (NaN)
-    assert len(labels) == 601 and sum(labels) == 201
+    # 20 Hz over 34 s; label 1 from 11 - 10 = 1 s on; the other trials have no critic (NaN)
+    assert len(labels) == 681 and sum(labels) == 661
+
+
+T = np.arange(0.0, 40.0, 0.05)
+
+
+def flags(*runs):
+    """FLAG_STUCK samples at 20 Hz, high inside each (start, end) run."""
+    return [(s, any(a <= s < b for a, b in runs)) for s in T]
+
+
+def test_entrapment_onset_episode_rules():
+    t = T
+    # Drives to x = 1 m by 10 s, then still: a run while driving is an earlier episode.
+    pos = [(s, (min(s, 10.0) * 0.1, 0.0)) for s in t]
+    assert entrapment_onset(flags((2, 4), (13, 40)), pos, 39.0) == pytest.approx(13.0)
+    # Slip flag already high while creeping the last 0.1 m: the onset is that run's start.
+    creep = [(s, (min(s, 20.0) * 0.02, 0.0)) for s in t]
+    assert entrapment_onset(flags((12, 40)), creep, 39.0) == pytest.approx(12.0)
+    # Escape toggles the flag without moving the rover: still one episode.
+    assert entrapment_onset(flags((13, 18), (21, 40)), pos, 39.0) == pytest.approx(13.0)
+    # 1-D odometer track works the same way.
+    odo = [(s, min(s, 10.0) * 0.1) for s in t]
+    assert entrapment_onset(flags((2, 4), (13, 40)), odo, 39.0) == pytest.approx(13.0)
+    # Without a track the last run is the episode; without FLAG_STUCK there is no onset.
+    assert entrapment_onset(flags((13, 18), (21, 40)), [], 39.0) == pytest.approx(21.0)
+    assert entrapment_onset(flags(), pos, 39.0) is None
+    assert entrapment_onset(flags((39.5, 40)), pos, 39.0) is None   # after the HALT
 
 
 def test_invalid_trials_are_marked(trials_root):

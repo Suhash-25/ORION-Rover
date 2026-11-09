@@ -16,21 +16,37 @@ Definitions (fixed here so the analysis is pre-registered, not chosen after the 
   /orion/ground_truth_pose (fallback /odom_rf2o; never wheel odometry, SPEC F4).
 - effective speed: progress / time-to-goal for a success, progress / trial duration (60 s)
   otherwise, so a rover that stops early is not rewarded for stopping.
-- time-to-entrapment: elapsed time for ENTRAPPED, else censored at the trial duration.
+- time-to-entrapment: elapsed time to the hard-stuck HALT for ENTRAPPED, else censored at the
+  trial duration.
+- entrapment onset t_entrap (ENTRAPPED only): the first FLAG_STUCK of the stuck episode that
+  ended in the HALT. The episode is the last run of FLAG_STUCK that is still high at, or
+  starts after, the last time the rover was >= 0.1 m (hard_stuck_progress_m) away from where
+  it halted; position from the pose track, else integrated TerrainState.body_speed, else the
+  last FLAG_STUCK run (see entrapment_onset).
 - energy: integral of V_bat * sum|duty_i * I_i| when RoverHealth is recorded (electrical,
   hardware), else of sum|tau_i * w_i| (mechanical, simulation).
-- critic calibration label at time t: 1 if the trial ended ENTRAPPED within 10 s after t,
-  0 if it did not and at least 10 s of trial remain; otherwise censored and left out.
+- critic calibration label at time t (council M2): in an ENTRAPPED trial 1 if
+  t_entrap - t <= 10 s, else 0; in any other trial 0 if at least 10 s of trial remain after t,
+  otherwise censored and left out. Labelling from the HALT instead would mark the rover
+  "safe" during the 23 s between motion stopping and the HALT.
 
 Phase-0 kill test (B0 only, reference light-packed; two-stage, SPEC section 8, D-008):
 - stage 1 (session phase0, 20 per cell): GO if for at least one loose cell the failure rate
-  rises >= 0.25 with one-sided Fisher exact p < 0.01, or the median effective speed drops
-  >= 30 % with one-sided Mann-Whitney p < 0.01. Otherwise CONTINUE (never NO-GO here).
+  is higher with one-sided Fisher exact p < 0.01, or the effective speed is lower with
+  one-sided Mann-Whitney p < 0.01. Otherwise CONTINUE (never NO-GO here).
 - stage 2 (session phase0b adds 20 more in light-packed and light-loose): light-loose vs
-  light-packed on all trials of both stages, same effect sizes, p < 0.04. GO or NO-GO.
+  light-packed on all trials of both stages, same tests, p < 0.04. GO or NO-GO.
 The 0.01 + 0.04 split bounds the overall false-GO rate at 0.05 (Bonferroni over two looks).
-Main study: one-sided Fisher on failure rate for each comparison in COMPARISONS within each
-cell, Holm-corrected over the whole family.
+EFFECT_SIZE_GATE (council M3, an open decision for the user, SPEC section 9) selects the rule:
+False (default): the tests alone decide; the failure-rate rise (Newcombe hybrid-score CI) and
+the median-speed drop (bootstrap CI) are reported next to the decision, descriptively.
+True: a test also needs a rise >= 0.25 / a drop >= 30 % (the original D-008 rule, which has
+less power; numbers from phase0_power in SPEC section 8).
+heavy-loose vs light-packed changes two factors (ballast and soil): a GO that rests on
+heavy-loose alone is reported as such, because H1 is the light-packed -> light-loose transfer.
+Main study: the primary test is student_critic vs B0 pooled over the loose cells (one-sided
+Fisher, alpha 0.05, not adjusted). Secondary: one-sided Fisher for each comparison in
+COMPARISONS within each cell, Holm-corrected over that family of 16.
 """
 
 from __future__ import annotations
@@ -55,9 +71,21 @@ LOOSE_CELLS = ('light-loose', 'heavy-loose')
 STAGE2_CELL = 'light-loose'
 STAGE2_SESSION = 'phase0b'
 STAGE_ALPHA = {1: 0.01, 2: 0.04}
+# Council M3 switch (SPEC section 9): False = GO on the one-sided tests alone, effect sizes
+# reported with CIs; True = the tests must also show a rise >= 0.25 / a drop >= 30 %.
+EFFECT_SIZE_GATE = False
+MIN_RATE_RISE = 0.25
+MIN_SPEED_DROP = 0.30
+# Cells that differ from REFERENCE_CELL in more than the soil (heavy-loose adds ballast too).
+TWO_FACTOR_CELLS = ('heavy-loose',)
 # (a, b): H1 = controller a fails less often than controller b, tested in every cell.
 COMPARISONS = (('student', 'B2'), ('student_critic', 'student'), ('student', 'B0'),
                ('B2', 'B0'))
+# Pre-registered primary main-study test (council m7): a fails less than b, pooled over
+# LOOSE_CELLS. The per-cell COMPARISONS are secondary.
+PRIMARY_COMPARISON = ('student_critic', 'B0')
+PRIMARY_ALPHA = 0.05
+HARD_STUCK_PROGRESS_M = 0.1      # orion_safety hard_stuck_progress_m (config/safety.yaml)
 POSE_TOPICS = ('/orion/ground_truth_pose', '/odom_rf2o')
 TOPICS = POSE_TOPICS + ('/orion/terrain_state', '/orion/safety_status', '/orion/policy_status',
                         '/joint_states', '/orion/rover_health')
@@ -94,18 +122,73 @@ def holm(pvalues: Sequence[float]) -> np.ndarray:
     return adjusted
 
 
+def wilson_interval(k: int, n: int, level: float = 0.95) -> tuple[float, float]:
+    """Wilson score interval of a binomial proportion k / n."""
+    if n <= 0:
+        return math.nan, math.nan
+    z = float(stats.norm.ppf(0.5 + level / 2.0))
+    p = k / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def newcombe_interval(k_a: int, n_a: int, k_b: int, n_b: int,
+                      level: float = 0.95) -> tuple[float, float]:
+    """Newcombe hybrid-score interval (his method 10) of the difference k_a/n_a - k_b/n_b."""
+    if n_a <= 0 or n_b <= 0:
+        return math.nan, math.nan
+    pa, pb = k_a / n_a, k_b / n_b
+    la, ua = wilson_interval(k_a, n_a, level)
+    lb, ub = wilson_interval(k_b, n_b, level)
+    d = pa - pb
+    return (d - math.sqrt((pa - la) ** 2 + (ub - pb) ** 2),
+            d + math.sqrt((ua - pa) ** 2 + (pb - lb) ** 2))
+
+
+def speed_drop_interval(x: Sequence[float], y: Sequence[float], level: float = 0.95,
+                        n_boot: int = 4000, seed: int = 0) -> tuple[float, float]:
+    """
+    Percentile-bootstrap interval of 1 - median(x) / median(y) (x test, y reference).
+
+    Each group is resampled on its own; resamples with median(y) <= 0 are dropped. The seed is
+    fixed so the report is reproducible.
+    """
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    if len(x) == 0 or len(y) == 0:
+        return math.nan, math.nan
+    rng = np.random.default_rng(seed)
+    mx = np.median(rng.choice(x, (n_boot, len(x))), axis=1)
+    my = np.median(rng.choice(y, (n_boot, len(y))), axis=1)
+    ok = my > 0
+    if not ok.any():
+        return math.nan, math.nan
+    drop = 1.0 - mx[ok] / my[ok]
+    tail = (1.0 - level) / 2.0 * 100.0
+    low, high = np.percentile(drop, [tail, 100.0 - tail])
+    return float(low), float(high)
+
+
 def phase0_stage(trials: pd.DataFrame) -> int:
     """2 once any trial of the stage-2 session (trial_id 'phase0b_...') is present, else 1."""
     return 2 if trials.trial_id.astype(str).str.startswith(STAGE2_SESSION + '_').any() else 1
 
 
+def _safety_count(df: pd.DataFrame) -> float:
+    """Count SAFETY outcomes (NaN when the frame has no outcome column)."""
+    return int((df.outcome == 'SAFETY').sum()) if 'outcome' in df else math.nan
+
+
 def phase0_decision(trials: pd.DataFrame, stage: Optional[int] = None,
-                    min_rate_rise: float = 0.25, min_speed_drop: float = 0.30,
-                    use_speed: bool = True, alpha: Optional[float] = None) -> dict:
+                    effect_size_gate: bool = EFFECT_SIZE_GATE,
+                    min_rate_rise: float = MIN_RATE_RISE, min_speed_drop: float = MIN_SPEED_DROP,
+                    use_speed: bool = True, alpha: Optional[float] = None,
+                    ci_level: float = 0.95) -> dict:
     """Two-stage GO / CONTINUE / NO-GO from valid B0 trials (see the module docstring)."""
-    # Columns: trial_id, cell, controller, valid, failure, effective_speed. stage defaults to
-    # phase0_stage(trials); alpha defaults to the pre-registered STAGE_ALPHA[stage] and exists
-    # only for sensitivity analyses, never for the reported decision.
+    # Columns: trial_id, cell, controller, valid, failure, effective_speed (outcome optional).
+    # stage defaults to phase0_stage(trials); alpha defaults to the pre-registered
+    # STAGE_ALPHA[stage] and exists only for sensitivity analyses, never for the reported
+    # decision. min_rate_rise / min_speed_drop only act when effect_size_gate is True.
     stage = phase0_stage(trials) if stage is None else stage
     if stage not in STAGE_ALPHA:
         raise ValueError(f'stage must be 1 or 2, got {stage}')
@@ -121,50 +204,86 @@ def phase0_decision(trials: pd.DataFrame, stage: Optional[int] = None,
             continue
         fa, na, fb, nb = int(test.failure.sum()), len(test), int(ref.failure.sum()), len(ref)
         rise = fa / na - fb / nb
+        rise_low, rise_high = newcombe_interval(fa, na, fb, nb, ci_level)
         p_fail = fisher_one_sided(fa, na, fb, nb, 'greater')
-        row = {'stage': stage, 'cell': cell, 'n': na, 'ref_n': nb, 'failures': fa,
+        big_rise = rise >= min_rate_rise or not effect_size_gate
+        row = {'stage': stage, 'cell': cell, 'factors_changed': 2 if cell in TWO_FACTOR_CELLS
+               else 1, 'n': na, 'ref_n': nb, 'failures': fa,
+               'safety_failures': _safety_count(test), 'ref_safety_failures': _safety_count(ref),
                'failure_rate': fa / na, 'ref_failure_rate': fb / nb, 'rate_rise': rise,
+               'rate_rise_ci_low': rise_low, 'rate_rise_ci_high': rise_high,
                'fisher_p': p_fail, 'alpha': alpha,
-               'failure_criterion': bool(rise >= min_rate_rise and p_fail < alpha)}
+               'failure_criterion': bool(p_fail < alpha and big_rise)}
         speed_x, speed_y = test.effective_speed.dropna(), ref.effective_speed.dropna()
         if use_speed and len(speed_x) and len(speed_y) and speed_y.median() > 0:
             drop = 1.0 - speed_x.median() / speed_y.median()
+            drop_low, drop_high = speed_drop_interval(speed_x, speed_y, ci_level)
             p_speed = mannwhitney_less(speed_x, speed_y)
+            big_drop = drop >= min_speed_drop or not effect_size_gate
             row.update(median_speed=speed_x.median(), ref_median_speed=speed_y.median(),
-                       speed_drop=drop, mannwhitney_p=p_speed,
-                       speed_criterion=bool(drop >= min_speed_drop and p_speed < alpha))
+                       speed_drop=drop, speed_drop_ci_low=drop_low, speed_drop_ci_high=drop_high,
+                       mannwhitney_p=p_speed, speed_criterion=bool(p_speed < alpha and big_drop))
         else:
             row.update(median_speed=math.nan, ref_median_speed=math.nan, speed_drop=math.nan,
+                       speed_drop_ci_low=math.nan, speed_drop_ci_high=math.nan,
                        mannwhitney_p=math.nan, speed_criterion=False)
         rows.append(row)
     table = pd.DataFrame(rows)
-    go = bool(len(table) and (table.failure_criterion | table.speed_criterion).any())
     if stage == 2 and table.empty:
         raise ValueError(f'stage 2 needs valid B0 trials in {STAGE2_CELL}')
+    go_cells = ([] if table.empty else
+                list(table.cell[table.failure_criterion | table.speed_criterion]))
+    go = bool(go_cells)
     decision = 'GO' if go else ('CONTINUE' if stage == 1 else 'NO-GO')
     return {'go': go, 'decision': decision, 'stage': stage, 'alpha': alpha, 'table': table,
-            'ref_n': len(ref), 'use_speed': use_speed}
+            'ref_n': len(ref), 'use_speed': use_speed, 'effect_size_gate': effect_size_gate,
+            'go_cells': go_cells,
+            'two_factor_only': go and all(c in TWO_FACTOR_CELLS for c in go_cells)}
 
 
-def main_study(trials: pd.DataFrame, comparisons=COMPARISONS, alpha: float = 0.05) -> pd.DataFrame:
-    """One-sided Fisher (a fails less than b) per cell and comparison, Holm over the family."""
+def _fisher_row(ta: pd.DataFrame, tb: pd.DataFrame, ci_level: float) -> dict:
+    """Failure counts, one-sided Fisher (a fails less than b) and the rate reduction b - a."""
+    fa, fb, na, nb = int(ta.failure.sum()), int(tb.failure.sum()), len(ta), len(tb)
+    low, high = newcombe_interval(fb, nb, fa, na, ci_level)
+    return {'n_a': na, 'n_b': nb, 'failure_rate_a': fa / na, 'failure_rate_b': fb / nb,
+            'rate_reduction': fb / nb - fa / na, 'rate_reduction_ci_low': low,
+            'rate_reduction_ci_high': high,
+            'fisher_p': fisher_one_sided(fa, na, fb, nb, 'less')}
+
+
+def main_study(trials: pd.DataFrame, comparisons=COMPARISONS, alpha: float = 0.05,
+               primary=PRIMARY_COMPARISON, primary_alpha: float = PRIMARY_ALPHA,
+               ci_level: float = 0.95) -> pd.DataFrame:
+    """
+    Pre-registered main-study tests, one row each (column role).
+
+    primary: a fails less than b, both pooled over LOOSE_CELLS, one-sided Fisher at
+    primary_alpha with no adjustment (holm_p = fisher_p). secondary: the same test per cell
+    and pair in comparisons, Holm-corrected over the secondary family only.
+    """
     valid = trials[trials.valid]
     rows = []
+    loose = valid[valid.cell.isin(LOOSE_CELLS)]
+    ta, tb = loose[loose.controller == primary[0]], loose[loose.controller == primary[1]]
+    if len(ta) and len(tb):
+        row = {'role': 'primary', 'cell': '+'.join(LOOSE_CELLS), 'a': primary[0],
+               'b': primary[1], **_fisher_row(ta, tb, ci_level)}
+        row.update(holm_p=row['fisher_p'], reject_h0=bool(row['fisher_p'] < primary_alpha))
+        rows.append(row)
+    secondary = []
     for cell in sorted(valid.cell.unique()):
         in_cell = valid[valid.cell == cell]
         for a, b in comparisons:
             ta, tb = in_cell[in_cell.controller == a], in_cell[in_cell.controller == b]
             if ta.empty or tb.empty:
                 continue
-            fa, fb = int(ta.failure.sum()), int(tb.failure.sum())
-            rows.append({'cell': cell, 'a': a, 'b': b, 'n_a': len(ta), 'n_b': len(tb),
-                         'failure_rate_a': fa / len(ta), 'failure_rate_b': fb / len(tb),
-                         'fisher_p': fisher_one_sided(fa, len(ta), fb, len(tb), 'less')})
-    table = pd.DataFrame(rows)
-    if len(table):
-        table['holm_p'] = holm(table.fisher_p)
-        table['reject_h0'] = table.holm_p < alpha
-    return table
+            secondary.append({'role': 'secondary', 'cell': cell, 'a': a, 'b': b,
+                              **_fisher_row(ta, tb, ci_level)})
+    if secondary:
+        adjusted = holm([r['fisher_p'] for r in secondary])
+        for r, p in zip(secondary, adjusted):
+            r.update(holm_p=float(p), reject_h0=bool(p < alpha))
+    return pd.DataFrame(rows + secondary)
 
 
 def calibration(risk: Sequence[float], label: Sequence[int], n_bins: int = 10) -> dict:
@@ -266,6 +385,62 @@ def _energy(msgs: dict) -> tuple[float, Optional[str]]:
     return energy, ('electrical' if len(health) else 'mechanical')
 
 
+def _flag_runs(samples) -> list[tuple[float, float]]:
+    """[(t_first_high, t_last_high)] of every run of True in [(t, bool)] (time order)."""
+    runs, start, last = [], None, None
+    for t, high in samples:
+        if high and start is None:
+            start = t
+        if high:
+            last = t
+        elif start is not None:
+            runs.append((start, last))
+            start = None
+    if start is not None:
+        runs.append((start, last))
+    return runs
+
+
+def entrapment_onset(stuck, track, t_halt: float,
+                     min_progress: float = HARD_STUCK_PROGRESS_M) -> Optional[float]:
+    """
+    First FLAG_STUCK (s) of the stuck episode that ended in the hard-stuck HALT at t_halt.
+
+    stuck: [(t, flag high)] from /orion/safety_status. track: [(t, position)] with position
+    an array in m (2-D pose or 1-D odometer); may be empty. The episode is the first FLAG_STUCK
+    run that is still high at, or starts after, the last time the rover was >= min_progress
+    away from its position at the HALT: earlier runs ended with the rover moving on. Without
+    a track the last run is the episode. None when FLAG_STUCK never rose before t_halt.
+    """
+    runs = _flag_runs([(t, high) for t, high in stuck if t <= t_halt])
+    if not runs:
+        return None
+    track = [(t, np.atleast_1d(np.asarray(p, float))) for t, p in track if t <= t_halt]
+    if not track:
+        return runs[-1][0]
+    final = track[-1][1]
+    far = [t for t, p in track if np.linalg.norm(p - final) >= min_progress]
+    t_free = max(far, default=-math.inf)
+    for start, end in runs:
+        if end >= t_free:
+            return start
+    return runs[-1][0]      # moved after every run (not a real hard-stuck): last run
+
+
+def _progress_track(msgs: dict):
+    """(source, [(t, position)]): pose track, else integrated terrain body speed, else none."""
+    source, poses = _pose_track(msgs)
+    if poses:
+        return source, [(t, (p.position.x, p.position.y)) for t, p in poses]
+    terrain = msgs.get('/orion/terrain_state', [])
+    if len(terrain) >= 2:
+        t = np.array([s for s, _ in terrain])
+        v = np.array([m.body_speed for _, m in terrain], float)
+        x = np.concatenate([[0.0], np.cumsum(0.5 * (v[1:] + v[:-1]) * np.diff(t))])
+        return 'terrain_odometer', list(zip(t, x))
+    return 'flags_only', []
+
+
 def trial_metrics(meta: dict, msgs: dict, cone_valid: Optional[bool] = None):
     """(one row of SPEC section 8 metrics, [(rho, label)] calibration samples)."""
     t0, t1 = meta.get('start_ros_s'), meta.get('end_ros_s')
@@ -304,7 +479,8 @@ def trial_metrics(meta: dict, msgs: dict, cone_valid: Optional[bool] = None):
         else math.nan
     row['energy_j'], row['energy_source'] = _energy(msgs)
 
-    stuck = [bool(m.flags & FLAG_STUCK) for _, m in msgs.get('/orion/safety_status', [])]
+    safety = msgs.get('/orion/safety_status', [])
+    stuck = [bool(m.flags & FLAG_STUCK) for _, m in safety]
     rises = sum(1 for a, b in zip([False] + stuck, stuck) if b and not a)
     falls = sum(1 for a, b in zip(stuck, stuck[1:]) if a and not b)
     modes = [m.mode for _, m in msgs.get('/orion/policy_status', [])]
@@ -313,13 +489,23 @@ def trial_metrics(meta: dict, msgs: dict, cone_valid: Optional[bool] = None):
                escapes=sum(1 for a, b in zip([None] + modes, modes)
                            if b == MODE_ESCAPE and a != MODE_ESCAPE))
 
+    t_onset, onset_source = math.nan, None
+    if entrapped:
+        t_halt = next((t for t, m in safety if m.flags & FLAG_HARD_STUCK), t1)
+        onset_source, track = _progress_track(msgs)
+        flags = [(t, bool(m.flags & FLAG_STUCK)) for t, m in safety]
+        t_onset = entrapment_onset(flags, track, t_halt)
+        if t_onset is None:     # ENTRAPPED without any FLAG_STUCK (operator outcome)
+            t_onset, onset_source = t_halt, 'halt'
+    row.update(entrapment_onset_s=t_onset - t0, onset_source=onset_source)
+
     samples = []
     risks = [(t, float(m.entrapment_risk)) for t, m in msgs.get('/orion/policy_status', [])
              if math.isfinite(m.entrapment_risk)]
     row['max_risk'] = max((r for _, r in risks), default=math.nan)
     for t, r in risks:
         if entrapped:
-            samples.append((r, int(t1 - t <= RISK_HORIZON_S)))
+            samples.append((r, int(t_onset - t <= RISK_HORIZON_S)))
         elif t1 - t >= RISK_HORIZON_S:
             samples.append((r, 0))
     return row, samples
@@ -368,8 +554,38 @@ def summary_table(trials: pd.DataFrame) -> pd.DataFrame:
         mean_slip=('mean_slip', 'mean'), mean_energy_j=('energy_j', 'mean')).reset_index()
 
 
+def _phase0_lines(ph: dict) -> list[str]:
+    alpha, gate = ph['alpha'], ph['effect_size_gate']
+    rise = (f'a failure-rate rise >= {MIN_RATE_RISE:g} with ' if gate
+            else 'a higher failure rate, ')
+    crit = f'{rise}one-sided Fisher p < {alpha}'
+    if ph['use_speed']:
+        drop = (f'a median effective-speed drop >= {MIN_SPEED_DROP:.0%} with ' if gate
+                else 'a lower effective speed, ')
+        crit += f', or {drop}one-sided Mann-Whitney p < {alpha}'
+    rule = ('effect-size gate ON (EFFECT_SIZE_GATE / --effect-size-gate)' if gate else
+            'effect-size gate OFF: effect sizes and their 95 % CIs are descriptive')
+    scope = ('at least one loose cell' if ph['stage'] == 1
+             else f'{STAGE2_CELL}, stages 1 and 2 pooled')
+    nxt = {'GO': '', 'NO-GO': ' Pivot to self-rescue (SPEC section 8).',
+           'CONTINUE': (f' Run stage 2 ({STAGE2_SESSION}_protocol.yaml: 20 more trials in '
+                        f'{REFERENCE_CELL} and {STAGE2_CELL}) and re-run this analysis.')}
+    lines = [f'## Phase-0 kill test, stage {ph["stage"]} (pre-registered)', '',
+             f'**Decision: {ph["decision"]}** (reference {REFERENCE_CELL}, n = {ph["ref_n"]}; '
+             f'GO needs {crit}, in {scope}; {rule}).{nxt[ph["decision"]]}', '']
+    if ph['two_factor_only']:
+        lines += ['**The GO rests on heavy-loose alone.** That cell changes ballast and soil '
+                  'together, so it does not isolate the light-packed -> light-loose transfer '
+                  'that H1 names; report it as a two-factor result.', '']
+    lines += ['SAFETY outcomes (current, tilt, heartbeat or geofence HALT) count as failures; '
+              'the current HALT depends on the I_peak GUESS (SPEC section 5), so the '
+              'safety_failures columns show how much of the result rests on it.', '',
+              _md(ph['table'])]
+    return lines
+
+
 def write_report(trials: pd.DataFrame, samples: dict, out_dir: str,
-                 use_speed: bool = True) -> dict:
+                 use_speed: bool = True, effect_size_gate: bool = EFFECT_SIZE_GATE) -> dict:
     """Write trials.csv, tests.csv, calibration.csv and report.md; return the results."""
     os.makedirs(out_dir, exist_ok=True)
     trials.to_csv(os.path.join(out_dir, 'trials.csv'), index=False)
@@ -381,25 +597,18 @@ def write_report(trials: pd.DataFrame, samples: dict, out_dir: str,
     tests = []
     b0 = trials[trials.controller == 'B0']
     if (b0.cell == REFERENCE_CELL).any() and b0.cell.isin(LOOSE_CELLS).any():
-        ph = phase0_decision(trials, use_speed=use_speed)
+        ph = phase0_decision(trials, use_speed=use_speed, effect_size_gate=effect_size_gate)
         results['phase0'] = ph
-        crit = (f'a failure-rate rise >= 0.25 with one-sided Fisher p < {ph["alpha"]}'
-                + (f', or a median effective-speed drop >= 30 % with one-sided Mann-Whitney '
-                   f'p < {ph["alpha"]}' if use_speed else ''))
-        scope = ('at least one loose cell' if ph['stage'] == 1
-                 else f'{STAGE2_CELL}, stages 1 and 2 pooled')
-        nxt = {'GO': '', 'NO-GO': ' Pivot to self-rescue (SPEC section 8).',
-               'CONTINUE': (f' Run stage 2 ({STAGE2_SESSION}_protocol.yaml: 20 more trials in '
-                            f'{REFERENCE_CELL} and {STAGE2_CELL}) and re-run this analysis.')}
-        lines += [f'## Phase-0 kill test, stage {ph["stage"]} (pre-registered)', '',
-                  f'**Decision: {ph["decision"]}** (reference {REFERENCE_CELL}, '
-                  f'n = {ph["ref_n"]}; GO needs {crit}, in {scope}).{nxt[ph["decision"]]}',
-                  '', _md(ph['table'])]
+        lines += _phase0_lines(ph)
         tests += [dict(test='phase0', **r) for r in ph['table'].to_dict('records')]
     ms = main_study(trials)
     if len(ms):
         results['main'] = ms
-        lines += ['## Main study: failure rate, one-sided Fisher, Holm-corrected', '', _md(ms)]
+        lines += ['## Main study: failure rate, one-sided Fisher', '',
+                  f'Primary (pre-registered): {PRIMARY_COMPARISON[0]} vs '
+                  f'{PRIMARY_COMPARISON[1]} pooled over {" and ".join(LOOSE_CELLS)}, '
+                  f'alpha {PRIMARY_ALPHA}, unadjusted. Secondary: every per-cell comparison, '
+                  'Holm-corrected over the secondary family (holm_p).', '', _md(ms)]
         tests += [dict(test='main', **r) for r in ms.to_dict('records')]
     pd.DataFrame(tests).to_csv(os.path.join(out_dir, 'tests.csv'), index=False)
     lines += ['## Critic calibration (rho vs entrapment within 10 s)', '']
@@ -428,6 +637,9 @@ def main(argv=None) -> int:
     parser.add_argument('--msg-dir', help='orion_msgs/msg directory (default: search)')
     parser.add_argument('--no-speed', action='store_true',
                         help='failure rate only (no ground truth, SPEC section 9)')
+    parser.add_argument('--effect-size-gate', action='store_true', default=EFFECT_SIZE_GATE,
+                        help='Phase-0 GO also needs a rise >= 0.25 / drop >= 30 %% (council '
+                             'M3; SPEC section 9 open decision)')
     args = parser.parse_args(argv)
     protocol = None
     if args.protocol:
@@ -437,7 +649,8 @@ def main(argv=None) -> int:
     if trials.empty:
         print(f'no finished trials under {args.trials_root}', file=sys.stderr)
         return 1
-    results = write_report(trials, samples, args.out, use_speed=not args.no_speed)
+    results = write_report(trials, samples, args.out, use_speed=not args.no_speed,
+                           effect_size_gate=args.effect_size_gate)
     if 'phase0' in results:
         ph = results['phase0']
         print(f'Phase-0 stage {ph["stage"]}: {ph["decision"]}')
