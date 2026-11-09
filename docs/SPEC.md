@@ -203,7 +203,8 @@ unadjusted; 40 % vs 10 %: 0.29 and 0.73. The pooled primary at 50 vs 50 has 0.64
 
 ## 9. Open decisions for the user
 
-- **Phase-0 decision rule (council M3), awaiting the user's choice.** Implemented default (b):
+- **Phase-0 decision rule (council M3): DECIDED 2026-11-09 13:28, option (b), by the user.**
+  Pre-registered and implemented as the default (b):
   GO on the one-sided failure-rate test at 0.01 / 0.04 alone, effect sizes and speed reported
   with CIs (`EFFECT_SIZE_GATE = False`, `SPEED_IN_DECISION = False`). Options, with the
   simulated numbers of section 8 (power at 10 % vs 40 %, false GO under H0):

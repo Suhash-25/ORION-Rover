@@ -77,7 +77,7 @@ Evaluation keeps the SPEC ranges, where B0 succeeds about 9 % of the time. Effec
 belly-out on training episodes fell from 86 % to 43 %, and the critic label mean from 0.72 to
 0.42.
 
-## D-012 Phase-0 decision: failure rate only, no effect-size gate (council M3; awaiting user)
+## D-012 Phase-0 decision: failure rate only, no effect-size gate (council M3; user-approved)
 FIX-C simulated the exact two-stage rule over 20 000 sessions:
 - GO on failures or speed: false GO 0.062-0.063, which breaks the promised 0.05.
 - The gated D-008 rule: power 0.75-0.81.
@@ -86,3 +86,5 @@ FIX-C simulated the exact two-stage rule over 20 000 sessions:
 Speed is still reported with its CI. Switches: `--speed-in-decision`, `--effect-size-gate`.
 The first decision card recommended "drop the gate" with speed included. It was withdrawn
 after FIX-C's numbers came in, and replaced by a corrected card (M-011).
+Approved by the user (suhas) at 13:28 on the corrected card: "No gate, failure rate only". It
+is now pre-registered and must not change after the first stage-1 trial.
