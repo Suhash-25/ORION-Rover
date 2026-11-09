@@ -81,7 +81,8 @@ def write_trial(root, trial_id, *, cell='light-packed', controller='B0', outcome
             write('/orion/policy_status', t, T['orion_msgs/msg/PolicyStatus'](
                 header=_header(ts, t), mode=4 if in_escape else 1,
                 entrapment_risk=float('nan') if risk is None else risk(t - T0),
-                latent=np.zeros(8, np.float32), policy_sha='', obs_spec_hash=''))
+                latent=np.zeros(8, np.float32), policy_sha='', obs_spec_hash='',
+                critic_gating=risk is not None))
             write('/joint_states', t, T['sensor_msgs/msg/JointState'](
                 header=_header(ts, t), name=['fl', 'fr', 'rl', 'rr'],
                 position=np.zeros(4), velocity=np.full(4, 2.0), effort=np.full(4, 1.0)))
