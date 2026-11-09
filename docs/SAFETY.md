@@ -114,16 +114,17 @@ orion_experiments must check that the topic is alive before starting a trial.
     6.7 N.m in an in-place spin, so the sim uses 10 / 20 N.m instead of 6 / 12 A; the geofence is
     off because the Gazebo worlds are not the sandbox and have no ground-truth pose.
 13. **Stuck by speed trusts a fresh fix without confidence** (council M7, `stuck_fresh_fix_s`
-    0.5 s). The SPEC confidence is c = exp(-t/3)(1 - |v_wheel - v_x| / 0.5). A rover that is
-    stuck while its wheels spin at >= 0.5 m/s rim speed has |v_wheel - v_x| >= 0.5, so c = 0
-    and the speed rule went blind exactly when it mattered. A body-speed fix (overhead camera,
+    0.5 s). The confidence was once c = exp(-t/3)(1 - |v_wheel - v_x| / 0.5): a rover stuck
+    with its wheels spinning at >= 0.5 m/s rim speed had c = 0, so the speed rule went blind
+    exactly when it mattered. It is now c = exp(-t_since_fix / 3) * clip(1 - kf_std / 0.1, 0,
+    1) (SPEC section 4, FIX-B), which no longer depends on the wheels but still decays while
+    the fix ages. A body-speed fix (overhead camera,
     or lidar odometry: TerrainState.time_since_fix counts any non-IMU fix) younger than 0.5 s
     measures the body directly, so the rule only needs the confidence when the fix is stale.
     The fix age is `time_since_fix` plus the age of the TerrainState message itself, so a
     message that stops arriving does not stay "fresh" for the 0.5 s terrain timeout. Stale fix
     and low confidence: the rule stays disabled, as before (an IMU-only speed must not declare
-    the rover stuck). FIX-B changes the confidence formula itself (Kalman std instead of the
-    wheel disagreement); this rule does not depend on which formula is used.
+    the rover stuck). The rule does not depend on which confidence formula is used.
 14. **The firmware e-stop is cleared only after the reset** (council m1, closed by FINAL).
     orion_hardware sends ESTOP on `/orion/estop` true and repeats it every cycle. It sends
     ESTOP_CLEAR only when `/orion/estop` is false **and** `/orion/safety_status` has shown

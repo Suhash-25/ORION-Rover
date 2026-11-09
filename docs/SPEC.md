@@ -62,7 +62,13 @@ m_total/14, g/9.81.
 - Body speed priority: EXTERNAL > LIDAR_ODOM > IMU_ONLY. 1-D Kalman on v_x: predict with
   gravity-compensated a_x, Q = (0.1 m/s^2)^2 dt; update R = (0.02 m/s)^2 external,
   (0.05 m/s)^2 lidar. Wheel odometry is never a body-speed source.
-- Confidence c = exp(-t_since_fix / 3 s) * (1 - min(1, |v_x,wheel - v_x| / 0.5)).
+- Confidence c = exp(-t_since_fix / 3 s) * clip(1 - kf_std / 0.1 m/s, 0, 1), kf_std = the
+  Kalman 1-sigma of v_x, t_since_fix = age of the last EXTERNAL / LIDAR_ODOM fix (inf before
+  the first, so c = 0). Wheel odometry plays no part (council M7: the former
+  1 - |v_x,wheel - v_x| / 0.5 term went to 0 exactly when the wheels spun in a trap). One
+  implementation: learning/orion_learning/estimator.py `speed_confidence`, used by the env and
+  orion_terrain. Fresh-fix rule: consumers that gate on the speed (the stuck rule, section 5)
+  trust it without the confidence while the fix is < 0.5 s old (`time_since_fix` + message age).
 - Effort model I_hat = c0 + c1 |w| + c2 dw/dt + c3 sin(pitch) sign(w), least squares on
   5 min packed-light driving, stored in orion_terrain/config/effort_model.yaml with git SHA.
   Residual e_i = I_i - I_hat_i; sinkage_proxy = clip(mean(e_i) / I_ref, 0, 1),
@@ -81,7 +87,7 @@ m_total/14, g/9.81.
 | heartbeat (firmware) | no CMD frame for 200 ms | targets 0, PID off, coast |
 | heartbeat (host) | /joint_states older than 300 ms or /imu/data older than 500 ms | HALT |
 | geofence | keep-in polygon (2 x 2 m minus 0.15 m); predicted pose in 1 s outside -> LIMITED; outside -> HALT | |
-| stuck | cmd v > 0.1 and body speed < 0.03 m/s for 3 s (confidence > 0.3), or slip_side > 0.8 for 3 s | flag stuck, policy arms ESCAPE; no halt |
+| stuck | cmd v > 0.1 and body speed < 0.03 m/s for 3 s with the speed trusted (a fix < 0.5 s old, or confidence > 0.3), or slip_side > 0.8 in the driven direction for 3 s | flag stuck, policy arms ESCAPE; no halt |
 | hard-stuck | stuck and < 0.1 m net progress over 20 s | HALT, outcome ENTRAPPED |
 | e-stop | /orion/estop true (latched) | ESTOP, mux lock, firmware ESTOP frame; clear via EstopReset |
 

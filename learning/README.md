@@ -52,7 +52,9 @@ through the same estimator maths the rover uses. Episodes end at the goal line (
 belly-out (z >= 8 cm), ENTRAPPED, leaving the 2 x 2 m fence, or 60 s. ENTRAPPED (info key
 `hard_stuck`) is the rover's own orion_safety rule, checked step by step against
 `SafetyMonitor` in `tests/test_entrapment.py`: FLAG_STUCK after 3 s of |cmd v| > 0.1 m/s with
-estimated speed < 0.03 m/s (confidence > 0.3) or driven-direction side slip > 0.8, then
+estimated speed < 0.03 m/s (trusted when the speed fix is < 0.5 s old or the confidence
+c = exp(-t_since_fix / 3) * clip(1 - kf_std / 0.1, 0, 1) is > 0.3; `estimator.py`) or
+driven-direction side slip > 0.8, then
 ENTRAPPED when that stuck episode is 20 s old and the last 20 s moved < 0.1 m. Belly-out stays
 a terminal in simulation but is **unobservable on hardware** (the rover does not measure
 sinkage); there it shows up later as ENTRAPPED or a timeout.
