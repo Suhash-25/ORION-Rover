@@ -126,8 +126,8 @@ def summarise(rows: list[dict]) -> list[dict]:
         rs = [r for r in rows if (r['controller'], r['cell'], r['gravity']) == (c, cell, g)]
         eff = np.array([r['effective_speed'] for r in rs])
         out.append({'controller': c, 'cell': cell, 'gravity': g, 'trials': len(rs),
-                    'success_rate': round(np.mean([r['success'] for r in rs]), 4),
-                    'entrapment_rate': round(np.mean([r['entrapped'] for r in rs]), 4),
+                    'success_rate': round(float(np.mean([r['success'] for r in rs])), 4),
+                    'entrapment_rate': round(float(np.mean([r['entrapped'] for r in rs])), 4),
                     'effective_speed_mean': round(float(eff.mean()), 4),
                     'effective_speed_median': round(float(np.median(eff)), 4)})
     return out

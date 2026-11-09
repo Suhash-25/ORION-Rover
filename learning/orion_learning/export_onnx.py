@@ -66,10 +66,18 @@ def _export(module: nn.Module, inputs: dict[str, torch.Tensor], output: str, pat
                           input_names=list(inputs), output_names=[output],
                           opset_version=OPSET, dynamo=False)
     model = onnx.load(str(path))
+    # The legacy exporter leaves some output dims symbolic (e.g. after Flatten); the contract
+    # fixes them, so write the static shape of the PyTorch output into the graph.
+    with torch.no_grad():
+        out_shape = module(*inputs.values()).shape
+    dims = model.graph.output[0].type.tensor_type.shape.dim
+    del dims[:]
+    for d in out_shape:
+        dims.add().dim_value = int(d)
     for k, v in meta.items():
         entry = model.metadata_props.add()
         entry.key, entry.value = k, str(v)
-    onnx.checker.check_model(model)
+    onnx.checker.check_model(model, full_check=True)
     onnx.save(model, str(path))
 
 

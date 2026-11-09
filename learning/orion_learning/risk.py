@@ -156,7 +156,7 @@ def train_critic(teacher: ActorCritic, adapter: TCNAdapter, env_cfg: EnvConfig,
             opt.zero_grad()
             loss.backward()
             opt.step()
-            losses.append(float(loss))
+            losses.append(loss.item())
         log(ep, {'bce_train': float(np.mean(losses)) if losses else float('nan')})
 
     with torch.no_grad():

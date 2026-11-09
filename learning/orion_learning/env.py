@@ -10,19 +10,26 @@ Physics per substep (all SI):
 * wheel i at body position (x_i, y_i) (front x = +L/2, left y = +b/2) sees longitudinal
   ground speed v_x - w_z y_i and lateral speed v_y + w_z x_i;
 * wheel load W_i = m g / 4 -+ m h a_x / (2 L) (front unloads under forward acceleration);
-* sinkage z_i <- max(z_target(s_i), z_i - 0.3 |v_long,i| dt) (sticky; relaxes only while
-  the wheel travels onto fresh soil);
+* sinkage: static part z0(W_i) immediately; the slip part is dug towards
+  z_target(s_i) = z0 (1 + a_s |s| / (1 - |s| + 0.05)) at DIG_RATE (0.1 m per metre of slipped
+  rim travel |r w - v|) and relaxes "stickily", z <- max(z_target, z - 0.3 |v_long| dt), only
+  while the wheel travels onto fresh soil. (The SPEC jumps to z_target instantly; then the
+  start-up slip transient buries 84 % of randomised rovers within 1 s, median 0.3 s, before
+  any controller can react. With the dig rate the median is 2.8 s. See the engineering log.)
 * longitudinal force F_i = m_fH H_i - m_fR Rc_i tanh(v_long,i / 0.01 m/s) (Rc opposes travel);
-* lateral force Fy_i = -mu_y W_i tanh(v_lat,i / 0.05 m/s);
+* lateral force Fy_i = -mu_y W_i tanh(v_lat,i / 0.05 m/s), with the per-wheel lateral speed,
+  which gives the skid-steer yaw resistance;
 * wheel J dw/dt = tau - r m_fH H, tau from a PI speed loop clipped to +-tau_max (x the
   torque-fault factor);
 * body m dv_x = sum F + m v_y w_z, m dv_y = sum Fy - m v_x w_z,
-  I_z dw_z = sum(-y_i F_i + x_i Fy_i).
+  I_z dw_z = sum(-y_i F_i + x_i Fy_i), I_z = 0.9 kg m^2 x m / 14 kg.
 
-The wheel-soil contact is very stiff near standstill (the slip denominator floors at
-0.02 m/s), so the 7 velocity states per rover are integrated with a linearised implicit
-(backward) Euler step: forces are linearised by finite differences and a batched 7x7 system
-is solved each substep. Explicit Euler is unstable at dt = 12.5 ms here.
+The contact is very stiff near standstill (the slip denominator floors at 0.02 m/s and Rc and
+Fy switch direction within 1-5 cm/s), so explicit Euler is unstable at dt = 12.5 ms. Each
+substep writes every contact force as a non-negative secant coefficient times a velocity
+(thrust = k (r w - v), Rc = c v, Fy = -d v_lat, coefficients taken at the current state) and
+solves the 7 velocities [w1..w4, v_x, v_y, w_z] implicitly with one batched 7x7 solve. The
+scheme is dissipative, so velocities never overshoot through zero.
 """
 
 from __future__ import annotations
@@ -425,7 +432,7 @@ class OrionEnv:
                                  st['stuck_t'] + DT, 0.0)
         success = d >= cfg.goal_m
         belly = z_max >= BELLY_OUT_Z
-        hard_stuck = st['stuck_t'] >= HARD_STUCK_TIME
+        hard_stuck = st['stuck_t'] >= HARD_STUCK_TIME - 1e-9    # sums of DT: round-off
         fence = np.any(np.abs(pose[:, :2]) > FENCE_HALF, axis=1)
         failed = (belly | hard_stuck | fence) & ~success
         terminated = success | failed
@@ -454,7 +461,7 @@ class OrionEnv:
         st['ss_speed_t'] = np.where(slow, st['ss_speed_t'] + DT, 0.0)
         st['ss_slip_t'] = np.where(sensors['slip_side'].max(axis=1) > 0.8,
                                    st['ss_slip_t'] + DT, 0.0)
-        soft_stuck = (st['ss_speed_t'] >= 3.0) | (st['ss_slip_t'] >= 3.0)
+        soft_stuck = (st['ss_speed_t'] >= 3.0 - 1e-9) | (st['ss_slip_t'] >= 3.0 - 1e-9)
 
         elapsed = st['t'] * DT
         info = {

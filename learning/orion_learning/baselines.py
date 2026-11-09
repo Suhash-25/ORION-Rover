@@ -73,7 +73,8 @@ class StuckDetector:
         spin = obs[:, _SLIP].max(axis=1) > r.slip_max
         self.t_speed = np.where(slow, self.t_speed + self.dt, 0.0)
         self.t_slip = np.where(spin, self.t_slip + self.dt, 0.0)
-        return (self.t_speed >= r.hold_s) | (self.t_slip >= r.hold_s)
+        hold = r.hold_s - 1e-9          # timers are sums of dt: guard float round-off
+        return (self.t_speed >= hold) | (self.t_slip >= hold)
 
 
 # Escape library E: each manoeuvre is a sequence of (duration s, v m/s, w rad/s) segments.

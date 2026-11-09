@@ -1,0 +1,10 @@
+# pip dependencies of orion_learning (no rosdep keys). CI: pip install -e "learning[train,bags,test]"
+# or pip install -r learning/requirements.txt && pip install -e learning
+numpy>=1.24
+torch>=2.1          # ONNX export uses the TorchScript exporter (dynamo=False); verified on 2.14
+gymnasium>=0.29
+onnx>=1.15
+onnxruntime>=1.17
+pyyaml>=6
+rosbags>=0.10       # synth_bag.py; writes rosbag2 v9 (sqlite3 or mcap) readable by Jazzy
+pytest>=7

@@ -96,7 +96,7 @@ def train_student(teacher: ActorCritic, env_cfg: EnvConfig, cfg: StudentConfig, 
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
-                losses.append(float(loss))
+                losses.append(loss.item())
         metrics = {'beta': beta, 'onpolicy_latent_mse': float(np.mean(sq_err)),
                    'train_latent_mse': float(np.mean(losses[-max(1, len(losses) // 4):])),
                    'dataset': float(len(Ht))}
