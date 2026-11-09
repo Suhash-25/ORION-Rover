@@ -59,3 +59,30 @@ Each PR is based on the previous one, so each diff stays reviewable. The alterna
 before the fix. The cloud account (aidevops-1) has no access, so the push runs on the user's
 PC with their own credentials (suhasintern), with the user's approval ("remote control to vs
 code, and push from there").
+
+## D-010 WP4 physics deviations ratified (council verdict 2, 2026-11-09)
+- Dig-rate slip sinkage (sinkage grows with slipped rim travel) replaces SPEC's instantaneous
+  z_target. SPEC's version buried the rover 84 % of the way in 1 s, which is unphysical.
+  DIG_RATE is now a per-episode model-form parameter, LogU(0.03, 0.3) m/m (FIX-A).
+- The secant-implicit integrator is kept, with an energy test (body work ≤ motor work).
+
+## D-011 Training distribution ≠ evaluation distribution (council B1; FIX-A)
+Training uses:
+- a patch derived from the main soil draw, present with p = 0.5;
+- mixture rejection on analytic peak DP/W, with the curriculum threshold going from 0.08 to 0;
+- a restricted fraction of **0.4**, not the council's 0.7. With 0.7, B0 completed 69-78 % of
+  episodes, which is outside the pre-registered 40-60 % band. With 0.4 it completes 46-52 %.
+
+Evaluation keeps the SPEC ranges, where B0 succeeds about 9 % of the time. Effect: B0
+belly-out on training episodes fell from 86 % to 43 %, and the critic label mean from 0.72 to
+0.42.
+
+## D-012 Phase-0 decision: failure rate only, no effect-size gate (council M3; awaiting user)
+FIX-C simulated the exact two-stage rule over 20 000 sessions:
+- GO on failures or speed: false GO 0.062-0.063, which breaks the promised 0.05.
+- The gated D-008 rule: power 0.75-0.81.
+- Failure-only, ungated (now the default): power 0.89-0.91, false GO 0.017-0.029.
+
+Speed is still reported with its CI. Switches: `--speed-in-decision`, `--effect-size-gate`.
+The first decision card recommended "drop the gate" with speed included. It was withdrawn
+after FIX-C's numbers came in, and replaced by a corrected card (M-011).

@@ -73,3 +73,12 @@ Format: what happened → root cause → lesson → guard now in place.
   controller. The test still passed and hid it.
 - **Lesson:** every TEMPORARY gets an entry in the integration todo with its removal
   condition, checked at each merge.
+
+## M-011 Recommended a statistical rule before simulating it
+- **What:** we put "drop the effect-size gate" to the user as the recommended option, while
+  speed was still a deciding metric. The simulation then showed a false-GO rate of 6.2 %.
+- **Root cause:** we reasoned that alpha splitting bounds the error, but that holds for one
+  test per look, and the rule runs 4 tests at stage 1.
+- **Lesson:** simulate the exact decision rule before recommending it. Never infer error rates
+  from the alpha bookkeeping alone.
+- **Caught by:** FIX-C's power simulation (`phase0_power`), before any trial was run.
