@@ -1,4 +1,4 @@
-# Phase-0 kill test (SPEC section 8, pre-registered): B0 tuned on light-packed, 20 trials in
+# Phase-0 kill test, stage 1 (SPEC section 8, pre-registered): B0 tuned on light-packed, 20 trials in
 # each of the 4 cells, blocked randomisation.
 #   ros2 run orion_experiments plan_session phase0_protocol.yaml --csv phase0_plan.csv
 session: phase0

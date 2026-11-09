@@ -71,4 +71,4 @@ def test_cli_writes_report_and_csvs(trials_root, tmp_path, capsys):
     report = (tmp_path / 'report.md').read_text()
     assert 'Phase-0 kill test' in report and 'Critic calibration' in report
     assert len(pd.read_csv(tmp_path / 'trials.csv')) == 4
-    assert 'Phase-0:' in capsys.readouterr().out
+    assert 'Phase-0 stage 1:' in capsys.readouterr().out

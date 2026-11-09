@@ -25,6 +25,18 @@ def test_phase0_protocol_plans_80_blocked_trials():
     assert [t.order for t in plan] == list(range(1, 81))
 
 
+def test_phase0b_stage2_extends_light_cells_to_40_each():
+    stage1 = load_protocol(os.path.join(CONFIG, 'phase0_protocol.yaml'))
+    stage2 = load_protocol(os.path.join(CONFIG, 'phase0b_protocol.yaml'))
+    plan = plan_session(stage2)
+    assert Counter(t.cell for t in plan) == {'light-packed': 20, 'light-loose': 20}
+    assert all(t.trial_id.startswith('phase0b_') for t in plan)
+    ids1 = {t.trial_id for t in plan_session(stage1)}
+    assert ids1.isdisjoint(t.trial_id for t in plan)
+    for cell in stage2.cells:   # soil prep must not change between the two looks
+        assert stage2.cone_depth_band_mm[cell] == stage1.cone_depth_band_mm[cell]
+
+
 def test_plan_is_a_pure_function_of_the_protocol():
     p = load_protocol(os.path.join(CONFIG, 'main_study_protocol.yaml'))
     a, b = plan_session(p), plan_session(p)

@@ -22,9 +22,13 @@ Definitions (fixed here so the analysis is pre-registered, not chosen after the 
 - critic calibration label at time t: 1 if the trial ended ENTRAPPED within 10 s after t,
   0 if it did not and at least 10 s of trial remain; otherwise censored and left out.
 
-Phase-0 GO / NO-GO (B0 only, reference light-packed): GO if for at least one loose cell
-the failure rate rises >= 0.25 with one-sided Fisher exact p < 0.05, or the median
-effective speed drops >= 30 % with one-sided Mann-Whitney p < 0.05.
+Phase-0 kill test (B0 only, reference light-packed; two-stage, SPEC section 8, D-008):
+- stage 1 (session phase0, 20 per cell): GO if for at least one loose cell the failure rate
+  rises >= 0.25 with one-sided Fisher exact p < 0.01, or the median effective speed drops
+  >= 30 % with one-sided Mann-Whitney p < 0.01. Otherwise CONTINUE (never NO-GO here).
+- stage 2 (session phase0b adds 20 more in light-packed and light-loose): light-loose vs
+  light-packed on all trials of both stages, same effect sizes, p < 0.04. GO or NO-GO.
+The 0.01 + 0.04 split bounds the overall false-GO rate at 0.05 (Bonferroni over two looks).
 Main study: one-sided Fisher on failure rate for each comparison in COMPARISONS within each
 cell, Holm-corrected over the whole family.
 """
@@ -48,6 +52,9 @@ FAILURE_OUTCOMES = ('TIMEOUT', 'ENTRAPPED', 'SAFETY')
 RISK_HORIZON_S = 10.0
 REFERENCE_CELL = 'light-packed'
 LOOSE_CELLS = ('light-loose', 'heavy-loose')
+STAGE2_CELL = 'light-loose'
+STAGE2_SESSION = 'phase0b'
+STAGE_ALPHA = {1: 0.01, 2: 0.04}
 # (a, b): H1 = controller a fails less often than controller b, tested in every cell.
 COMPARISONS = (('student', 'B2'), ('student_critic', 'student'), ('student', 'B0'),
                ('B2', 'B0'))
@@ -87,23 +94,37 @@ def holm(pvalues: Sequence[float]) -> np.ndarray:
     return adjusted
 
 
-def phase0_decision(trials: pd.DataFrame, alpha: float = 0.05, min_rate_rise: float = 0.25,
-                    min_speed_drop: float = 0.30, use_speed: bool = True) -> dict:
-    """GO / NO-GO from valid B0 trials (columns cell, controller, failure, effective_speed)."""
+def phase0_stage(trials: pd.DataFrame) -> int:
+    """2 once any trial of the stage-2 session (trial_id 'phase0b_...') is present, else 1."""
+    return 2 if trials.trial_id.astype(str).str.startswith(STAGE2_SESSION + '_').any() else 1
+
+
+def phase0_decision(trials: pd.DataFrame, stage: Optional[int] = None,
+                    min_rate_rise: float = 0.25, min_speed_drop: float = 0.30,
+                    use_speed: bool = True, alpha: Optional[float] = None) -> dict:
+    """Two-stage GO / CONTINUE / NO-GO from valid B0 trials (see the module docstring)."""
+    # Columns: trial_id, cell, controller, valid, failure, effective_speed. stage defaults to
+    # phase0_stage(trials); alpha defaults to the pre-registered STAGE_ALPHA[stage] and exists
+    # only for sensitivity analyses, never for the reported decision.
+    stage = phase0_stage(trials) if stage is None else stage
+    if stage not in STAGE_ALPHA:
+        raise ValueError(f'stage must be 1 or 2, got {stage}')
+    alpha = STAGE_ALPHA[stage] if alpha is None else alpha
     b0 = trials[(trials.controller == 'B0') & trials.valid]
     ref = b0[b0.cell == REFERENCE_CELL]
     if ref.empty:
         raise ValueError(f'no valid B0 trials in the reference cell {REFERENCE_CELL}')
     rows = []
-    for cell in LOOSE_CELLS:
+    for cell in (LOOSE_CELLS if stage == 1 else (STAGE2_CELL,)):
         test = b0[b0.cell == cell]
         if test.empty:
             continue
         fa, na, fb, nb = int(test.failure.sum()), len(test), int(ref.failure.sum()), len(ref)
         rise = fa / na - fb / nb
         p_fail = fisher_one_sided(fa, na, fb, nb, 'greater')
-        row = {'cell': cell, 'n': na, 'failures': fa, 'failure_rate': fa / na,
-               'ref_failure_rate': fb / nb, 'rate_rise': rise, 'fisher_p': p_fail,
+        row = {'stage': stage, 'cell': cell, 'n': na, 'ref_n': nb, 'failures': fa,
+               'failure_rate': fa / na, 'ref_failure_rate': fb / nb, 'rate_rise': rise,
+               'fisher_p': p_fail, 'alpha': alpha,
                'failure_criterion': bool(rise >= min_rate_rise and p_fail < alpha)}
         speed_x, speed_y = test.effective_speed.dropna(), ref.effective_speed.dropna()
         if use_speed and len(speed_x) and len(speed_y) and speed_y.median() > 0:
@@ -118,7 +139,11 @@ def phase0_decision(trials: pd.DataFrame, alpha: float = 0.05, min_rate_rise: fl
         rows.append(row)
     table = pd.DataFrame(rows)
     go = bool(len(table) and (table.failure_criterion | table.speed_criterion).any())
-    return {'go': go, 'table': table, 'ref_n': len(ref), 'use_speed': use_speed}
+    if stage == 2 and table.empty:
+        raise ValueError(f'stage 2 needs valid B0 trials in {STAGE2_CELL}')
+    decision = 'GO' if go else ('CONTINUE' if stage == 1 else 'NO-GO')
+    return {'go': go, 'decision': decision, 'stage': stage, 'alpha': alpha, 'table': table,
+            'ref_n': len(ref), 'use_speed': use_speed}
 
 
 def main_study(trials: pd.DataFrame, comparisons=COMPARISONS, alpha: float = 0.05) -> pd.DataFrame:
@@ -358,12 +383,18 @@ def write_report(trials: pd.DataFrame, samples: dict, out_dir: str,
     if (b0.cell == REFERENCE_CELL).any() and b0.cell.isin(LOOSE_CELLS).any():
         ph = phase0_decision(trials, use_speed=use_speed)
         results['phase0'] = ph
-        lines += ['## Phase-0 kill test (pre-registered)', '',
-                  f'**Decision: {"GO" if ph["go"] else "NO-GO"}** (reference {REFERENCE_CELL}, '
-                  f'n = {ph["ref_n"]}; GO needs a failure-rate rise >= 0.25 with one-sided '
-                  'Fisher p < 0.05' + (', or a median effective-speed drop >= 30 % with '
-                                       'one-sided Mann-Whitney p < 0.05' if use_speed else '')
-                  + ', in at least one loose cell).', '', _md(ph['table'])]
+        crit = (f'a failure-rate rise >= 0.25 with one-sided Fisher p < {ph["alpha"]}'
+                + (f', or a median effective-speed drop >= 30 % with one-sided Mann-Whitney '
+                   f'p < {ph["alpha"]}' if use_speed else ''))
+        scope = ('at least one loose cell' if ph['stage'] == 1
+                 else f'{STAGE2_CELL}, stages 1 and 2 pooled')
+        nxt = {'GO': '', 'NO-GO': ' Pivot to self-rescue (SPEC section 8).',
+               'CONTINUE': (f' Run stage 2 ({STAGE2_SESSION}_protocol.yaml: 20 more trials in '
+                            f'{REFERENCE_CELL} and {STAGE2_CELL}) and re-run this analysis.')}
+        lines += [f'## Phase-0 kill test, stage {ph["stage"]} (pre-registered)', '',
+                  f'**Decision: {ph["decision"]}** (reference {REFERENCE_CELL}, '
+                  f'n = {ph["ref_n"]}; GO needs {crit}, in {scope}).{nxt[ph["decision"]]}',
+                  '', _md(ph['table'])]
         tests += [dict(test='phase0', **r) for r in ph['table'].to_dict('records')]
     ms = main_study(trials)
     if len(ms):
@@ -408,7 +439,8 @@ def main(argv=None) -> int:
         return 1
     results = write_report(trials, samples, args.out, use_speed=not args.no_speed)
     if 'phase0' in results:
-        print('Phase-0:', 'GO' if results['phase0']['go'] else 'NO-GO')
+        ph = results['phase0']
+        print(f'Phase-0 stage {ph["stage"]}: {ph["decision"]}')
     print(f'report written to {os.path.join(args.out, "report.md")}')
     return 0
 

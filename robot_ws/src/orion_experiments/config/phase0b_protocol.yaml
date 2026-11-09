@@ -1,0 +1,15 @@
+# Phase-0 kill test, stage 2 (SPEC section 8, D-008). Run only if stage 1 (phase0) did not
+# give an early GO: 20 more B0 trials in light-packed (C) and light-loose (D), so each has 40.
+# The analysis pools both stages and tests D vs C once at p < 0.04.
+#   ros2 run orion_experiments plan_session phase0b_protocol.yaml --csv phase0b_plan.csv
+session: phase0b
+seed: 20261110
+cells: [light-packed, light-loose]
+controllers: [B0]
+n: 20
+randomisation: blocked
+duration_s: 60
+# Same bands as stage 1: the soil prep must not change between stages.
+cone_depth_band_mm:
+  light-packed: [5.0, 15.0]
+  light-loose: [25.0, 60.0]

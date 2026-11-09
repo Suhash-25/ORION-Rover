@@ -45,11 +45,11 @@ def test_holm_step_down():
     np.testing.assert_allclose(holm([0.5, 0.6]), [1.0, 1.0])
 
 
-def session(failures: dict, speeds: dict, controller='B0', n=20):
+def session(failures: dict, speeds: dict, controller='B0', n=20, name='phase0'):
     rows = []
     for cell, f in failures.items():
         for i in range(n):
-            rows.append({'trial_id': f'{cell}_{i}', 'cell': cell, 'controller': controller,
+            rows.append({'trial_id': f'{name}_{cell}_{i}', 'cell': cell, 'controller': controller,
                          'valid': True, 'failure': i < f,
                          'effective_speed': speeds[cell][i % len(speeds[cell])]})
     return pd.DataFrame(rows)
@@ -59,28 +59,56 @@ BASE_SPEED = np.linspace(0.08, 0.12, 20)
 SAME = {c: BASE_SPEED for c in ('light-packed', 'light-loose', 'heavy-packed', 'heavy-loose')}
 
 
-def test_go_on_failure_rate():
-    df = session({'light-packed': 2, 'light-loose': 8, 'heavy-packed': 3, 'heavy-loose': 5},
-                 SAME)
-    assert len(df) == 80
-    res = phase0_decision(df)
-    assert res['go']
+STAGE1 = {'light-packed': 2, 'light-loose': 8, 'heavy-packed': 3, 'heavy-loose': 5}
+LIGHT = {c: SAME[c] for c in ('light-packed', 'light-loose')}
+
+
+def test_stage1_never_says_no_go():
+    # 8/20 vs 2/20: p = 0.032 passes the old single-look 0.05 but not the stage-1 0.01.
+    res = phase0_decision(session(STAGE1, SAME))
+    assert res['stage'] == 1 and res['alpha'] == 0.01
+    assert res['decision'] == 'CONTINUE' and not res['go']
     row = res['table'].set_index('cell').loc['light-loose']
     assert row.fisher_p == pytest.approx(hand_fisher_greater(8, 20, 2, 20))
-    assert row.rate_rise == pytest.approx(0.3) and row.failure_criterion
-    assert not res['table'].set_index('cell').loc['heavy-loose'].failure_criterion
+    assert row.rate_rise == pytest.approx(0.3) and not row.failure_criterion
 
 
-def test_no_go():
-    speeds = dict(SAME, **{'light-loose': BASE_SPEED * 0.9, 'heavy-loose': BASE_SPEED * 0.9})
-    df = session({'light-packed': 3, 'light-loose': 4, 'heavy-packed': 3, 'heavy-loose': 5},
-                 speeds)
-    assert len(df) == 80
+def test_stage1_early_go():
+    res = phase0_decision(session(dict(STAGE1, **{'light-loose': 10, 'light-packed': 1}),
+                                  SAME))
+    row = res['table'].set_index('cell').loc['light-loose']
+    assert row.fisher_p == pytest.approx(hand_fisher_greater(10, 20, 1, 20))
+    assert row.fisher_p < 0.01
+    assert res['decision'] == 'GO' and res['go']
+
+
+def test_stage2_pools_both_stages_and_tests_light_loose_only():
+    df = pd.concat([session(STAGE1, SAME),
+                    session({'light-packed': 2, 'light-loose': 8}, LIGHT, name='phase0b')])
     res = phase0_decision(df)
-    assert not res['go']
-    t = res['table'].set_index('cell')
-    assert t.loc['light-loose'].speed_drop == pytest.approx(0.1)
-    assert not t.speed_criterion.any() and not t.failure_criterion.any()
+    assert res['stage'] == 2 and res['alpha'] == 0.04
+    t = res['table']
+    assert list(t.cell) == ['light-loose'] and t.n.iloc[0] == 40 and t.ref_n.iloc[0] == 40
+    assert t.fisher_p.iloc[0] == pytest.approx(hand_fisher_greater(16, 40, 4, 40))
+    assert res['decision'] == 'GO'
+
+
+def test_stage2_no_go():
+    speeds = dict(SAME, **{'light-loose': BASE_SPEED * 0.9, 'heavy-loose': BASE_SPEED * 0.9})
+    df = pd.concat([session(STAGE1, speeds),
+                    session({'light-packed': 4, 'light-loose': 4},
+                            {c: speeds[c] for c in LIGHT}, name='phase0b')])
+    res = phase0_decision(df)  # 12/40 vs 6/40: p = 0.09
+    assert res['decision'] == 'NO-GO' and not res['go']
+    row = res['table'].iloc[0]
+    assert row.speed_drop == pytest.approx(0.1) and not row.speed_criterion
+
+
+def test_stage_override_and_bad_stage():
+    forced = phase0_decision(session(STAGE1, SAME), stage=2)  # p = 0.032 < 0.04
+    assert forced['alpha'] == 0.04 and forced['decision'] == 'GO'
+    with pytest.raises(ValueError):
+        phase0_decision(session(STAGE1, SAME), stage=3)
 
 
 def test_go_on_speed_only_and_failure_only_mode():
