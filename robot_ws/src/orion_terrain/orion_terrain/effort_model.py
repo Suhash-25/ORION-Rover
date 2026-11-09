@@ -14,8 +14,10 @@ whenever the wheel needs MORE effort than on flat packed ground, in either drivi
 The literal SPEC form with a signed I would report reversing out of sand as negative
 sinkage, i.e. never during an escape manoeuvre.
 
-Below the speed deadband sign(w) is noise; there d = sign(I) (a stalled wheel pushing into
-sand still reads as positive extra effort). The fit ignores samples inside the deadband.
+The residual is only informative while the wheel turns (|w| >= deadband: sign(w) is defined)
+and the rover is not turning hard (|yaw rate| <= max_yaw_rate: skid-steer scrub torque is not
+in the model and dominates the effort, see the WP3 log). Outside that window the residual of
+that wheel is HELD by the caller (`EffortModel.informative`); the fit uses the same window.
 """
 
 from __future__ import annotations
@@ -42,24 +44,29 @@ class EffortSource(IntEnum):
 EFFORT_UNITS = {EffortSource.CURRENT: 'A', EffortSource.DUTY_ESTIMATE: 'A',
                 EffortSource.SIM_TORQUE: 'N.m'}
 N_COEF = 4
-MODEL_FORM = ('d*I = c0 + c1*|w| + c2*d*dw/dt + c3*d*sin(pitch), '
-              'd = sign(w) (sign(I) if |w| < deadband)')
+MODEL_FORM = ('d*I = c0 + c1*|w| + c2*d*dw/dt + c3*d*sin(pitch), d = sign(w); '
+              'valid for |w| >= deadband_radps and |yaw rate| <= max_yaw_rate_radps')
+# Below this std of sin(pitch) in the calibration data the slope term is not identifiable.
+MIN_SLOPE_EXCITATION = 0.01
 
 
-def rotation_direction(w: Sequence[float], effort: Sequence[float],
-                       deadband: float) -> np.ndarray:
-    """Per-wheel direction d in {-1, +1}: sign(w) outside the deadband, else sign(effort)."""
-    w = np.asarray(w, dtype=np.float64)
-    effort = np.asarray(effort, dtype=np.float64)
-    d = np.where(np.abs(w) >= deadband, np.sign(w), np.sign(effort))
-    return np.where(d == 0.0, 1.0, d)
+def direction(w: Sequence[float]) -> np.ndarray:
+    """Direction of rotation d in {-1, +1} (+1 at exactly zero)."""
+    return np.where(np.asarray(w, dtype=np.float64) < 0.0, -1.0, 1.0)
 
 
-def design_matrix(w, dwdt, pitch, direction) -> np.ndarray:
+def design_matrix(w, dwdt, pitch, d) -> np.ndarray:
     """Regressors [1, |w|, d dw/dt, d sin(pitch)], shape (..., 4); w in rad/s, pitch in rad."""
-    w, dwdt, d = (np.asarray(a, dtype=np.float64) for a in (w, dwdt, direction))
+    w, dwdt, d = (np.asarray(a, dtype=np.float64) for a in (w, dwdt, d))
     s = np.sin(np.asarray(pitch, dtype=np.float64)) * np.ones_like(w)
     return np.stack([np.ones_like(w), np.abs(w), d * dwdt, d * s], axis=-1)
+
+
+def informative_mask(w, yaw_rate, deadband: float, max_yaw_rate: float) -> np.ndarray:
+    """Mark where the flat-ground model applies: wheel turning, rover not turning hard."""
+    w = np.asarray(w, dtype=np.float64)
+    yaw_ok = np.abs(np.asarray(yaw_rate, dtype=np.float64)) <= max_yaw_rate
+    return (np.abs(w) >= deadband) & (yaw_ok if w.ndim == 1 else yaw_ok[:, None])
 
 
 @dataclass
@@ -72,6 +79,8 @@ class EffortModel:
     effort_source: EffortSource          # what the effort signal was during calibration
     calibrated: bool
     deadband_radps: float = 0.5
+    max_yaw_rate_radps: float = 0.2
+    slope_identified: bool = True        # False: c3 forced to 0 (no slope in the data)
     git_sha: str = 'unknown'
     date: str = 'unknown'
     source: str = 'unknown'
@@ -88,13 +97,17 @@ class EffortModel:
 
     def residual(self, w, dwdt, pitch: float, effort) -> np.ndarray:
         """Effort residual per wheel, e = d I - I_dir_hat, in effort_unit (+ = extra load)."""
-        d = rotation_direction(w, effort, self.deadband_radps)
+        d = direction(w)
         x = design_matrix(w, dwdt, pitch, d)
         predicted = np.einsum('ij,ij->i', x, self.coefficients)
         return d * np.asarray(effort, dtype=np.float64) - predicted
 
+    def informative(self, w, yaw_rate: float) -> np.ndarray:
+        """Per-wheel mask of samples whose residual means something (else: hold)."""
+        return informative_mask(w, yaw_rate, self.deadband_radps, self.max_yaw_rate_radps)
+
     def sinkage_proxy(self, residual: Sequence[float]) -> float:
-        """clip(mean(residual) / I_ref, 0, 1)."""
+        """Return clip(mean(residual) / I_ref, 0, 1)."""
         return float(np.clip(np.mean(residual) / self.i_ref, 0.0, 1.0))
 
     # --- persistence ---------------------------------------------------------------------
@@ -108,6 +121,8 @@ class EffortModel:
             'effort_unit': self.effort_unit,
             'effort_source': self.effort_source.name,
             'deadband_radps': float(self.deadband_radps),
+            'max_yaw_rate_radps': float(self.max_yaw_rate_radps),
+            'slope_identified': bool(self.slope_identified),
             'r2': {name: float(r) for name, r in zip(WHEEL_ORDER, self.r2)},
             'n_samples': {name: int(n) for name, n in zip(WHEEL_ORDER, self.n_samples)},
             'git_sha': self.git_sha,
@@ -125,6 +140,8 @@ class EffortModel:
                 effort_source=EffortSource[d['effort_source']],
                 calibrated=bool(d['calibrated']),
                 deadband_radps=float(d['deadband_radps']),
+                max_yaw_rate_radps=float(d['max_yaw_rate_radps']),
+                slope_identified=bool(d['slope_identified']),
                 git_sha=str(d['git_sha']), date=str(d['date']), source=str(d['source']),
                 r2=[float(d['r2'][n]) for n in WHEEL_ORDER],
                 n_samples=[int(d['n_samples'][n]) for n in WHEEL_ORDER])
@@ -146,31 +163,43 @@ class EffortModel:
         return cls.from_dict(data['effort_model'])
 
 
-def fit_coefficients(w: np.ndarray, dwdt: np.ndarray, pitch: np.ndarray, effort: np.ndarray,
-                     deadband: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+@dataclass
+class FitResult:
+    coefficients: np.ndarray        # (4, 4)
+    r2: np.ndarray                  # (4,), on the direction-aligned effort d I
+    n_samples: np.ndarray           # (4,) samples used per wheel
+    slope_identified: bool          # False: too little pitch variation, c3 forced to 0
+
+
+def fit_coefficients(w, dwdt, pitch, effort, yaw_rate, deadband: float,
+                     max_yaw_rate: float) -> FitResult:
     """
     Least-squares fit per wheel.
 
-    Inputs are (N, 4) arrays (w rad/s, dw/dt rad/s^2, effort) and pitch (N,) rad. Samples with
-    |w| < deadband are dropped. Returns (coefficients (4, 4), R^2 (4,), samples used (4,)).
-    R^2 is computed on the direction-aligned effort d I that the model predicts.
+    Inputs: w, dw/dt, effort (N, 4) in rad/s, rad/s^2, effort unit; pitch and yaw_rate (N,) in
+    rad and rad/s. Only informative samples (informative_mask) are used. When the data has no
+    slope (std of sin(pitch) < MIN_SLOPE_EXCITATION) c3 is not identifiable and is set to 0.
     """
-    w, dwdt, effort = (np.asarray(a, dtype=np.float64) for a in (w, dwdt, effort))
-    pitch = np.asarray(pitch, dtype=np.float64)
-    coefs = np.zeros((w.shape[1], N_COEF))
-    r2 = np.full(w.shape[1], np.nan)
-    used = np.zeros(w.shape[1], dtype=int)
-    for i in range(w.shape[1]):
-        keep = np.abs(w[:, i]) >= deadband
-        used[i] = int(keep.sum())
+    w, dwdt, effort, pitch, yaw_rate = (np.asarray(a, dtype=np.float64)
+                                        for a in (w, dwdt, effort, pitch, yaw_rate))
+    mask = informative_mask(w, yaw_rate, deadband, max_yaw_rate)
+    n_wheels = w.shape[1]
+    coefs, r2 = np.zeros((n_wheels, N_COEF)), np.full(n_wheels, np.nan)
+    used = mask.sum(axis=0)
+    slope_ok = True
+    for i in range(n_wheels):
+        keep = mask[:, i]
         if used[i] < 4 * N_COEF:
-            raise ValueError(f'wheel {WHEEL_ORDER[i]}: only {used[i]} samples above the '
-                             f'{deadband} rad/s deadband; drive more')
-        d = np.sign(w[keep, i])
+            raise ValueError(f'wheel {WHEEL_ORDER[i]}: only {used[i]} samples with '
+                             f'|w| >= {deadband} rad/s and |yaw rate| <= {max_yaw_rate} rad/s')
+        d = direction(w[keep, i])
         x = design_matrix(w[keep, i], dwdt[keep, i], pitch[keep], d)
         y = d * effort[keep, i]
-        coefs[i], *_ = np.linalg.lstsq(x, y, rcond=None)
+        cols = N_COEF
+        if np.std(np.sin(pitch[keep])) < MIN_SLOPE_EXCITATION:
+            slope_ok, cols = False, N_COEF - 1
+        coefs[i, :cols], *_ = np.linalg.lstsq(x[:, :cols], y, rcond=None)
         ss_res = float(np.sum((y - x @ coefs[i]) ** 2))
         ss_tot = float(np.sum((y - y.mean()) ** 2))
         r2[i] = 1.0 - ss_res / ss_tot if ss_tot > 0 else float('nan')
-    return coefs, r2, used
+    return FitResult(coefs, r2, used, slope_ok)

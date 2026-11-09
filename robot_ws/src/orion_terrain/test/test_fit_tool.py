@@ -81,13 +81,14 @@ def test_effort_source_from_rover_health_and_sim():
     effort = signed_effort(TRUE_COEFS, w, dwdt, pitch)
     msgs = [(0.0, '/orion/rover_health', {'current_sensed': False})]
     for k in range(len(t)):
-        msgs.append((t[k], '/imu/data', {'orientation': dict(zip('xyzw', quat_from_rpy(
-            0, pitch[k], 0)))}))
+        msgs.append((t[k], '/imu/data', {
+            'orientation': dict(zip('xyzw', quat_from_rpy(0, pitch[k], 0))),
+            'angular_velocity': {'x': 0.0, 'y': 0.0, 'z': 0.0}}))
         msgs.append((t[k] + 1e-4, '/joint_states', {
             'name': list(DEFAULT_JOINT_NAMES), 'velocity': w[k], 'effort': effort[k]}))
     s = extract_samples(msgs)
     kw = {'i_ref': 3.0, 'i_stall': None, 'i_free': None, 'free_speed_mps': 0.3,
-          'deadband_radps': 0.5, 'source': 'test', 'sha': 'x'}
+          'deadband_radps': 0.5, 'max_yaw_rate_radps': 0.2, 'source': 'test', 'sha': 'x'}
     assert fit_model(s, sim=False, effort_source=None, **kw).effort_source == \
         EffortSource.DUTY_ESTIMATE
     sim = fit_model(s, sim=True, effort_source=None, **kw)

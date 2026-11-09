@@ -45,16 +45,18 @@ class LowPass:
         self.value: Optional[np.ndarray] = None
         self._t: Optional[float] = None
 
-    def update(self, t: float, x: Sequence[float]) -> np.ndarray:
-        """Add sample x at time t (s); return the filtered value."""
+    def update(self, t: float, x: Sequence[float], mask=None) -> np.ndarray:
+        """
+        Add sample x at time t (s); return the filtered value.
+
+        Entries where ``mask`` is False are held (they start at 0 if never updated).
+        """
         x = np.asarray(x, dtype=np.float64)
+        mask = np.ones(x.shape, dtype=bool) if mask is None else np.asarray(mask, dtype=bool)
         if self.value is None or self._t is None:
-            self.value = x.copy()
+            self.value = np.where(mask, x, 0.0)
         elif t > self._t:
             alpha = 1.0 - math.exp(-(t - self._t) / self.tau) if self.tau > 0 else 1.0
-            self.value = self.value + alpha * (x - self.value)
+            self.value = np.where(mask, self.value + alpha * (x - self.value), self.value)
         self._t = t if self._t is None else max(self._t, t)
         return self.value
-
-    def reset(self) -> None:
-        self.value, self._t = None, None

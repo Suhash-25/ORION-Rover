@@ -36,15 +36,19 @@ from orion_terrain.params import DEFAULT_JOINT_NAMES, DEFAULT_TOPICS, TerrainPar
 
 def read_bag(bag_dir: str, topics: Sequence[str]) -> Iterator[tuple[float, str, object]]:
     """Yield (t s, topic, msg) from a rosbag2 directory; t = header stamp, else bag time."""
-    from rosbags.highlevel import AnyReader
+    from rosbags.highlevel import AnyReader, AnyReaderError
     from rosbags.typesys import get_typestore, Stores
 
-    with AnyReader([Path(bag_dir)],
-                   default_typestore=get_typestore(Stores.ROS2_JAZZY)) as reader:
-        conns = [c for c in reader.connections if c.topic in topics]
-        for conn, t_ns, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
-            yield stamp_seconds(msg, t_ns * 1e-9), conn.topic, msg
+    try:
+        with AnyReader([Path(bag_dir)],
+                       default_typestore=get_typestore(Stores.ROS2_JAZZY)) as reader:
+            conns = [c for c in reader.connections if c.topic in topics]
+            for conn, t_ns, raw in reader.messages(connections=conns):
+                msg = reader.deserialize(raw, conn.msgtype)
+                yield stamp_seconds(msg, t_ns * 1e-9), conn.topic, msg
+    except AnyReaderError as e:
+        raise ValueError(f'cannot read bag {bag_dir}: {e} (a recorder killed with SIGKILL '
+                         'leaves an unreadable file: `ros2 bag convert` it first)') from e
 
 
 def extract_samples(messages: Iterable[tuple[float, str, object]],
@@ -54,12 +58,14 @@ def extract_samples(messages: Iterable[tuple[float, str, object]],
     """
     Regression data in WHEEL_ORDER, built with the runtime's own dw/dt estimator.
 
-    Returns arrays w, dwdt, effort (N, 4), pitch (N,) and the set of current_sensed values
-    seen in RoverHealth. Joint samples before the first IMU orientation are skipped.
+    Returns arrays w, dwdt, effort (N, 4), pitch and yaw_rate (N,) (latest IMU sample) and
+    the set of current_sensed values seen in RoverHealth. Joint samples before the first IMU
+    orientation are skipped.
     """
     wheel_accel = WheelAccel(accel_tau_s)
     pitch: Optional[float] = None
-    rows = {'w': [], 'dwdt': [], 'effort': [], 'pitch': []}
+    yaw_rate = 0.0
+    rows = {'w': [], 'dwdt': [], 'effort': [], 'pitch': [], 'yaw_rate': []}
     current_sensed = set()
     for t, topic, msg in sorted(messages, key=lambda m: m[0]):
         if topic == topics['imu']:
@@ -67,6 +73,7 @@ def extract_samples(messages: Iterable[tuple[float, str, object]],
                 pitch = roll_pitch(msg_quat(msg, 'orientation'))[1]
             except ValueError:
                 continue
+            yaw_rate = float(msg_get(msg, 'angular_velocity.z'))
         elif topic == topics['rover_health']:
             current_sensed.add(bool(msg_get(msg, 'current_sensed')))
         elif topic == topics['joint_states']:
@@ -83,6 +90,7 @@ def extract_samples(messages: Iterable[tuple[float, str, object]],
             rows['dwdt'].append(dwdt)
             rows['effort'].append(np.asarray(effort, dtype=np.float64)[idx])
             rows['pitch'].append(pitch)
+            rows['yaw_rate'].append(yaw_rate)
     if not rows['w']:
         raise ValueError('no usable /joint_states (with effort) after the first /imu/data')
     out = {k: np.asarray(v) for k, v in rows.items()}
@@ -108,8 +116,8 @@ def git_sha(cwd: Optional[str] = None) -> str:
 
 def fit_model(samples: dict, *, sim: bool, effort_source: Optional[EffortSource],
               i_ref: Optional[float], i_stall: Optional[float], i_free: Optional[float],
-              free_speed_mps: float, deadband_radps: float, source: str,
-              sha: str) -> EffortModel:
+              free_speed_mps: float, deadband_radps: float, max_yaw_rate_radps: float,
+              source: str, sha: str) -> EffortModel:
     """Least-squares fit plus I_ref and provenance; raises ValueError on unusable input."""
     if sim:
         effort_source = EffortSource.SIM_TORQUE
@@ -119,8 +127,9 @@ def fit_model(samples: dict, *, sim: bool, effort_source: Optional[EffortSource]
             raise ValueError('cannot tell the effort source: pass --effort-source '
                              f'(RoverHealth.current_sensed values in the bag: {sorted(seen)})')
         effort_source = EffortSource.CURRENT if seen.pop() else EffortSource.DUTY_ESTIMATE
-    coefs, r2, used = fit_coefficients(samples['w'], samples['dwdt'], samples['pitch'],
-                                       samples['effort'], deadband_radps)
+    fit = fit_coefficients(samples['w'], samples['dwdt'], samples['pitch'], samples['effort'],
+                           samples['yaw_rate'], deadband_radps, max_yaw_rate_radps)
+    coefs = fit.coefficients
     if i_ref is None:
         if i_stall is None:
             raise ValueError('I_ref is needed: pass --i-ref, or --i-stall from the stall test')
@@ -131,8 +140,10 @@ def fit_model(samples: dict, *, sim: bool, effort_source: Optional[EffortSource]
     return EffortModel(
         coefficients=coefs, i_ref=float(i_ref), effort_unit=EFFORT_UNITS[effort_source],
         effort_source=effort_source, calibrated=True, deadband_radps=deadband_radps,
+        max_yaw_rate_radps=max_yaw_rate_radps, slope_identified=fit.slope_identified,
         git_sha=sha, date=datetime.now(timezone.utc).isoformat(timespec='seconds'),
-        source=source, r2=[float(r) for r in r2], n_samples=[int(n) for n in used])
+        source=source, r2=[float(r) for r in fit.r2],
+        n_samples=[int(n) for n in fit.n_samples])
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -149,6 +160,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument('--i-free', type=float, help='free-running effort (default: fitted)')
     ap.add_argument('--free-speed', type=float, default=0.3, help='m/s for the fitted I_free')
     ap.add_argument('--deadband', type=float, default=0.5, help='rad/s; slower samples dropped')
+    ap.add_argument('--max-yaw-rate', type=float, default=0.2,
+                    help='rad/s; samples turning faster are dropped (scrub is not modelled)')
     ap.add_argument('--joint-names', nargs=4, default=list(DEFAULT_JOINT_NAMES),
                     metavar=WHEEL_ORDER)
     ap.add_argument('--git-sha', help='override the detected git SHA')
@@ -163,6 +176,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             effort_source=EffortSource[args.effort_source] if args.effort_source else None,
             i_ref=args.i_ref, i_stall=args.i_stall, i_free=args.i_free,
             free_speed_mps=args.free_speed, deadband_radps=args.deadband,
+            max_yaw_rate_radps=args.max_yaw_rate,
             source=f'{os.path.abspath(args.bag_dir)} ({n} joint_states samples)',
             sha=args.git_sha or git_sha())
     except ValueError as e:
@@ -176,6 +190,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f'{name:5} {c[0]:9.4f} {c[1]:9.4f} {c[2]:9.4f} {c[3]:9.4f} {r:6.3f} {n:7d}')
     print(f'I_ref = {model.i_ref:.4g} {model.effort_unit}, source {model.effort_source.name}, '
           f'git {model.git_sha} -> {out}')
+    if not model.slope_identified:
+        print('warning: no slope in the bag, c3 (slope term) set to 0; on slopes the residual '
+              'will include the gravity load', file=sys.stderr)
     if min(model.r2) < 0.5:
         print('warning: R^2 < 0.5 on some wheel; the residual will be noisy. Check the bag.',
               file=sys.stderr)

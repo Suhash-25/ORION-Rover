@@ -197,7 +197,8 @@ class TerrainEstimator:
             self.warn_once('/joint_states carries no effort: no effort residual')
             return
         e = np.asarray(effort, dtype=np.float64)[idx]
-        self._residual_lp.update(t, self.model.residual(w, dwdt, self._pitch, e))
+        self._residual_lp.update(t, self.model.residual(w, dwdt, self._pitch, e),
+                                 mask=self.model.informative(w, self._yaw_rate))
 
     def on_wheel_odom(self, t: float, v: float) -> None:
         """diff_drive_controller body speed (m/s): ONLY used in the confidence term."""
