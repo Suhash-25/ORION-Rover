@@ -1,0 +1,13 @@
+# Gazebo overrides, loaded after safety.yaml by orion_bringup/gazebo.launch.py.
+orion_safety:
+  ros__parameters:
+    # In Gazebo /joint_states effort is wheel TORQUE in N.m, not amps. Measured 2026-11-09
+    # (headless, empty.sdf, max |effort| over 4 wheels): 0 N.m driving straight at 0.5 m/s,
+    # spin in place at 1 rad/s median 5.3 / p95 6.0 / max 6.1 N.m, transients up to 6.7 N.m.
+    # The rover thresholds (6 / 12 A) would LIMIT every in-place spin, so the sim uses
+    # torque thresholds above normal driving. The rule logic is unit-tested independently.
+    current_cont: 10.0             # N.m
+    current_peak: 20.0             # N.m
+    # Gazebo worlds are not the 2 x 2 m sandbox and there is no ground-truth pose topic;
+    # the odom fallback would HALT test drives and Nav2 goals past 0.85 m.
+    geofence_enabled: false
