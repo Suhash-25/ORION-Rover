@@ -55,3 +55,29 @@ official ROS apt servers are blocked there. CI on GitHub uses the official apt p
   progress log) but make every verification a real command (`scripts/verify.sh …`). The old
   `echo`/`print` checks are removed because they reported false passes (see M-001).
 - Created this log (JOURNAL, DECISIONS, MISTAKES) and backfilled everything above.
+
+### 11:15 Council review returned (Fable 5.1) → plan v3
+- 8 findings adopted (docs/SPEC.md §1). Biggest changes to the plan:
+  - "Recoverability margin" renamed **entrapment risk** and only calibrated (not trained) on the
+    rover, because nothing on the real rover can label "could have escaped" (F1).
+  - Sim randomises model-form error and the gravity-soil coupling itself, otherwise training in
+    an Earth-fitted soil model is circular (F2).
+  - Kill test pre-registered: 4 cells × 20, Fisher exact + Mann-Whitney, explicit GO/NO-GO (F3).
+  - Wheel odometry is never body velocity; sandbox needs external truth (overhead camera +
+    AprilTag) or lidar odometry (F4). Open question for the user.
+  - Current ≠ sinkage: effort residual vs. a calibrated flat-ground model (F5).
+  - RMA kept; privileged inputs are traction descriptors; robust PPO baseline B2 mandatory (F6).
+  - Replay harness so the estimator and policy are tested on data with known truth (F7).
+  - Safety publishes limits; firmware owns the hard current limit and watchdog (F8).
+- Froze the contract myself before parallel coding: orion_msgs (4 msgs, 4 srvs) and
+  learning/orion_learning/obs_spec.py (20-float observation, slip, normalisation, layout hash;
+  7 tests pass). ONNX artefact contract written for the exporter and the runtime.
+
+### 11:20 Parallel coding started (Opus 5.5, high effort), one git worktree each
+- WP1 safety + twist_mux + launches + INTERFACES/SAFETY/BRINGUP docs
+- WP2 serial protocol + firmware core + orion_hardware ros2_control plugin + HARDWARE/PROTOCOL docs
+- WP3 orion_terrain (Kalman body speed, slip, effort residual, calibration tool)
+- WP4 learning/ (soil model, env, PPO/RMA/critic, B0/B2, ONNX export, synthetic bags)
+- WP5 orion_policy (runtime, B0, gating, modes) + orion_experiments (runner, stats)
+- Each agent logs to docs/engineering-log/agents/WPn.md. Next: council review of each branch,
+  integration, full verification.
