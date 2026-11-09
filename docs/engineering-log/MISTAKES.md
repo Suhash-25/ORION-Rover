@@ -82,3 +82,12 @@ Format: what happened → root cause → lesson → guard now in place.
 - **Lesson:** simulate the exact decision rule before recommending it. Never infer error rates
   from the alpha bookkeeping alone.
 - **Caught by:** FIX-C's power simulation (`phase0_power`), before any trial was run.
+
+## M-012 Sim sensor noise set equal to the safety threshold it feeds
+- **What:** speed-fix noise was 1σ = 0.03 m/s, and the stuck threshold is |v| < 0.03 m/s. A
+  stalled rover passed the test on only ~85 % of steps, so the 3 s continuous hold almost never
+  completed. In sim, B0 never escaped and the critic never saw entrapment.
+- **Root cause:** the noise and the threshold were chosen separately. Nothing checked that the
+  rule could fire.
+- **Lesson:** every detection rule needs a test that it fires on a known-positive case under the
+  configured noise. That test also exposed a float bug in the monitor's hold timer.

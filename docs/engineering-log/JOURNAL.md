@@ -175,3 +175,35 @@ official ROS apt servers are blocked there. CI on GitHub uses the official apt p
   - FIX-C: statistics, labels, the safety rule, docs and M8.
 - M3 was put to the user as a decision. Recommended: drop the effect-size gate. FIX-C builds
   the rule behind one switch.
+
+### 13:05 FIX-C merged (statistics, labels, safety, docs)
+- Its own power simulation found that the recommended ungated rule, with speed counted, gives a
+  false-GO rate of 6.2 %. The integrator made speed descriptive by default
+  (`SPEED_IN_DECISION = False`), which gives power 0.91 and false GO 1.7-2.9 % (D-012, M-011).
+- The decision card was withdrawn and reposted with the corrected numbers.
+- FIX-C also fixed a pre-existing bug: the bag fixture lacked critic_gating.
+
+### 13:10 FIX-A merged (training distribution)
+- B0 now completes 46-52 % of training episodes. It completed 5.5 % before.
+- Belly-out fell from 86 % to 43 %.
+- The council's 0.7 restricted fraction would push B0 completion out of the band, so it is set
+  to 0.4 (D-011).
+- Sensitivity: the B0 outcome flips with loose a_s, so the sim is uninformative on H1.
+
+### 13:20 FIX-B merged (one history, escape library, B0 and estimator)
+- New OBS_SPEC_HASH f28f136d0518c63d.
+- Golden replay: slip RMS 0.021 against truth, proxy RMS 0.006 against the env.
+- The runtime no longer resets the rate limiter when switching channels.
+
+### 13:25 Integrator seam fixes
+- The call sites now push only obs, and the env's stuck flag is passed in.
+- Branches per escape: 5.
+- The speed-fix noise was 0.03 m/s, equal to the threshold, so the stuck rule fired for only
+  1.6 % of stalled rovers. Lowered to 0.015.
+- With the noise lowered, the golden test exposed a float off-by-one in orion_safety's
+  `_Held`: 2.9999999999999982 s < 3 s. Fixed with a 1e-9 tolerance.
+- Removed the temporary push shim.
+- Results:
+  - learning: 99 passed.
+  - robot_ws: 493 tests, 0 failures, including all 4 Gazebo tests.
+  - Smoke training: 37 s.
