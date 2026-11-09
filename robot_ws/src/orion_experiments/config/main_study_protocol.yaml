@@ -1,0 +1,13 @@
+# Main study (SPEC section 8): 4 cells x 4 controllers x 25 = 400 trials.
+session: main
+seed: 20261201
+cells: [light-packed, light-loose, heavy-packed, heavy-loose]
+controllers: [B0, B2, student, student_critic]
+n: 25
+randomisation: blocked
+duration_s: 60
+cone_depth_band_mm:
+  light-packed: [5.0, 15.0]
+  heavy-packed: [5.0, 15.0]
+  light-loose: [25.0, 60.0]
+  heavy-loose: [25.0, 60.0]

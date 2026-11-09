@@ -1,0 +1,26 @@
+# orion_policy parameters. Values come from docs/SPEC.md sections 3, 5 and 6.
+orion_policy:
+  ros__parameters:
+    # FL, FR, RL, RR (obs_spec.WHEEL_ORDER); names from orion_control/config/controllers.yaml
+    wheel_joints: [front_left_wheel_joint, front_right_wheel_joint,
+                   rear_left_wheel_joint, rear_right_wheel_joint]
+    # Effort normaliser, same unit as /joint_states effort: N.m in Gazebo (tau_max = 3.0,
+    # SPEC section 6). On the rover effort is in A: set this to the current that corresponds to
+    # tau_max (GUESS until the motors are characterised, see docs/HARDWARE.md).
+    effort_max: 3.0
+    gravity: 9.81                 # m/s^2, removes gravity from /imu/data
+    initial_mode: IDLE            # IDLE | BASELINE | POLICY
+    model_dir: ""                 # directory with manifest.json + ONNX files; "" = no POLICY
+    safety_timeout_s: 0.5         # older SafetyStatus -> publish zero
+    critic_gating: true           # false = B3 (student without critic gating)
+    risk_thresholds: [0.3, 0.5, 0.7]
+    caution_max_speed: 0.2        # m/s cap for 0.3 <= rho < 0.5, and for retreats
+    probe_cooldown_s: 5.0
+    retreat_path_s: 2.0           # s of driving kept to retreat along
+    max_escape_attempts: 3
+    b0:
+      cruise_speed: 0.3           # m/s
+      slip_threshold: 0.3         # slip_side above which the governor cuts speed
+      cut_rate: 0.20              # fraction of cruise per s
+      recover_rate: 0.05          # fraction of cruise per s
+      min_fraction: 0.4           # keeps v >= 0.12 m/s, above the stuck detector's 0.1 m/s gate

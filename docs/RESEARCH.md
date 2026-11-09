@@ -56,7 +56,7 @@ ORION is a four-wheel skid-steer research rover (ROS 2 Jazzy, Gazebo Harmonic, `
 
 1. **Hardware list is still unknown.** Most important: can motor current be logged at ≥50 Hz? Can encoders and the IMU be logged at ≥100 Hz? The first decides H3 and probing. The second decides tipping-point sensing.
 2. **Novelty is not proven.** It rests on targeted searches, not a systematic review. Phase 0 week 1 is the review.
-3. **Paper TODOs:** author email, acknowledgment, JPL citation for Opportunity at "Purgatory", hardware [TBD] values in Table II, and the four new prior-art papers in Part 2C.
+3. **Paper TODOs:** author email, acknowledgment, JPL citation for Opportunity at "Purgatory", hardware [TBD] values in Table II, and (the Part 2C prior art is now cited).
 4. ~~Trial count mismatch~~ resolved: two-stage H1 design (Part 2B).
 
 ## 0.6 Project history (how the concept evolved)
@@ -87,7 +87,7 @@ ORION is a four-wheel skid-steer research rover (ROS 2 Jazzy, Gazebo Harmonic, `
 
 Suhas G, Department of Computer Science and Engineering (AI & ML), Maharaja Institute of Technology Mysore, Karnataka, India.
 
-*Converted from the LaTeX source. Citation numbers refer to the References list at the end of Part 1. Section numbers follow the PDF: 1 Introduction, 2 Related Work, 3 Problem, 4 Method, 5 Simulation, 6 Hardware, 7 Evaluation, 8 Design Rationale, 9 Threats, 10 Plan, 11 Conclusion, then the Appendices.*
+*Converted from the LaTeX source (27 pages). Citation numbers refer to the References list at the end of Part 1. Section numbers follow the PDF: 1 Introduction, 2 Related Work, 3 Problem, 4 Method, 5 Simulation, 6 Hardware, 7 Evaluation, 8 Design Rationale, 9 Threats, 10 Plan, 11 Conclusion, then the Appendices.*
 
 ## Abstract
 
@@ -155,6 +155,8 @@ Two strands of work address non-geometric hazards. The first estimates terrain p
 
 The second strand detects entrapment. Qiu \[9\] proposed a naive Bayes entrapment detector for planetary rovers. Detection is a necessary ingredient, but a detector that fires once the rover is already trapped arrives too late. Our recoverability margin is intended to fire *before* the boundary is crossed, and to be conditioned on the inferred soil and gravity.
 
+Two further strands address what happens once the rover is embedded. Promit *et al.* \[34\] train a recurrent policy in a continuum (material point method) simulation to escape granular entrapment without a scripted maneuver. They report 62.5% mean escape across seeds against 7 of 32 trials for the best of ten scripted controllers, and note that physical transfer is unverified. From the published abstract, the work does not predict entrapment before it occurs and does not treat reduced gravity. Its learned escape is complementary to our fixed escape library, which we keep fixed for reproducible margin labels (Section 8). Goldman and colleagues showed that a wheel-legged rover can deliberately remodel granular terrain to free itself and climb loose slopes \[35, 36\]. Finally, Yoshida *et al.* \[37\] defined terramechanics-based traction and slip margins for traction control of a lunar rover. Their margins are computed from a soil model; under the Earth-test bias, such a model inherits the optimistic calibration that this proposal is concerned with.
+
 ### Terramechanics and Reduced-Gravity Testing
 
 Classical terramechanics models wheel–soil interaction with semi-empirical pressure–sinkage and shear–displacement relations \[4, 5\]. Their parameters are fitted from bevameter and soil-bin measurements on Earth. Discrete-element and continuum granular models can capture effects outside the range of those fits, at much greater computational cost. Project Chrono \[31\] is an open-source multi-physics engine that includes deformable terrain models of both kinds.
@@ -175,25 +177,30 @@ In robotics, Nagabandi *et al.* \[20\] meta-learned dynamics models that adapt o
 
 Constrained Markov decision processes \[27\] and constrained policy optimization \[28\] formalize safety as expected-cost constraints, which is not the same as avoiding a single irreversible event. Leave No Trace \[23\] learns a reset policy alongside the forward policy and aborts when the reset value predicts that the agent cannot return. It is the closest antecedent of our recoverability margin, but it is not meta-learned across dynamics and assumes a single environment. Single-life RL \[22\] formalizes completing a novel task in one episode without resets using prior experience, and proposes Q-weighted adversarial learning (QWALE) to steer back toward familiar states. Plaut *et al.* \[24\] give regret guarantees under irreversible dynamics when the agent can ask a mentor for help. Sorstkins *et al.* \[25\] add a learned reversibility signal and selective rollback to value-based RL. Cho and Sun \[26\] propose constrained meta-RL with differentiable convex programming to maintain safety constraints during adaptation.
 
+### Active Excitation and Early-Warning Signals
+
+Two lines of work outside planetary robotics bear on measuring, rather than predicting, how close a vehicle is to losing traction. In automotive research, torque is deliberately added to wheels to excite tire forces and estimate tire–road friction \[38\], and automated vehicles have been controlled into high slip to observe the peak of the friction curve \[39\]. These methods target cars on rigid roads and fit a tire model. In dynamical systems, a system approaching a fold bifurcation recovers ever more slowly from small perturbations. This critical slowing down underlies early-warning signals for critical transitions \[40\], and it has recently been used as a model-free warning of loss of control in drones \[41, 42\]. On loose soil, the drawbar pull–slip curve has a peak beyond which slip rises sharply \[43\], which suggests that entrapment may approach as a fold of this kind. We found no work that applies active excitation or critical slowing down to wheel–soil entrapment, or that uses such a measured signal inside meta-RL. We treat this as a candidate extension, gated by its own Phase 0 test (Section 10), not as part of the core claims.
+
 ### Gap Analysis
 
 Table 1 positions the proposal against the closest work. The gap is not any single ingredient; each exists. The gap is their combination in a form that addresses a documented failure mode of a real engineering process.
 
-|                              |                     |                 |           |              |             |             |
-|:-----------------------------|:-------------------:|:---------------:|:---------:|:------------:|:-----------:|:-----------:|
-| Work                         |    Meta-learned     | Irreversibility |  Gravity  |  Soil-side   | Mid-episode |    Real     |
-|                              |     adaptation      |     modeled     |  varied   | gravity bias |   change    |  hardware   |
-| Hu *et al.* 2025 \[1\]       |         no          |       no        |    yes    |     yes      |     no      |  lab tests  |
-| Bouton *et al.* 2026 \[12\]  |         no          |       no        |    no     |      no      | not stated  |     yes     |
-| Omi *et al.* 2023 \[10\]     | partial (recurrent) |       no        |    no     |      no      |     yes     |     no      |
-| MAGIC-VFM 2024 \[11\]        |     yes (model)     |       no        |    no     |      no      | not stated  |     yes     |
-| Arm *et al.* 2025 \[13\]     |         no          |       no        |    yes    |      no      |     no      |     yes     |
-| Banerjee *et al.* 2020 \[8\] |     yes (model)     |       no        |    no     |      no      | not stated  | not stated  |
-| RMA 2021 \[19\]              |       partial       |       no        |    no     |      no      |     yes     |     yes     |
-| Single-life RL 2022 \[22\]   |   no (prior data)   |     partial     |    no     |      no      |     n/a     | not stated  |
-| Leave No Trace 2018 \[23\]   |         no          |       yes       |    no     |      no      |     no      |     no      |
-| Plaut *et al.* 2026 \[24\]   |         no          |  yes (theory)   |    no     |      no      |     n/a     |     no      |
-| **This proposal**            |         yes         |       yes       | yes (sim) |     yes      |     yes     | yes (Earth) |
+|                              |                     |                  |           |              |             |             |
+|:-----------------------------|:-------------------:|:----------------:|:---------:|:------------:|:-----------:|:-----------:|
+| Work                         |    Meta-learned     | Irreversibility  |  Gravity  |  Soil-side   | Mid-episode |    Real     |
+|                              |     adaptation      |     modeled      |  varied   | gravity bias |   change    |  hardware   |
+| Hu *et al.* 2025 \[1\]       |         no          |        no        |    yes    |     yes      |     no      |  lab tests  |
+| Bouton *et al.* 2026 \[12\]  |         no          |        no        |    no     |      no      | not stated  |     yes     |
+| Omi *et al.* 2023 \[10\]     | partial (recurrent) |        no        |    no     |      no      |     yes     |     no      |
+| MAGIC-VFM 2024 \[11\]        |     yes (model)     |        no        |    no     |      no      | not stated  |     yes     |
+| Arm *et al.* 2025 \[13\]     |         no          |        no        |    yes    |      no      |     no      |     yes     |
+| Banerjee *et al.* 2020 \[8\] |     yes (model)     |        no        |    no     |      no      | not stated  | not stated  |
+| RMA 2021 \[19\]              |       partial       |        no        |    no     |      no      |     yes     |     yes     |
+| Single-life RL 2022 \[22\]   |   no (prior data)   |     partial      |    no     |      no      |     n/a     | not stated  |
+| Leave No Trace 2018 \[23\]   |         no          |       yes        |    no     |      no      |     no      |     no      |
+| Plaut *et al.* 2026 \[24\]   |         no          |   yes (theory)   |    no     |      no      |     n/a     |     no      |
+| Promit *et al.* 2026 \[34\]  |    no (learned)     | partial (escape) |    no     |      no      |     n/a     |     no      |
+| **This proposal**            |         yes         |       yes        | yes (sim) |     yes      |     yes     | yes (Earth) |
 
 Positioning against the closest prior work, based on published abstracts and papers read for this proposal. “Partial” means the aspect is addressed indirectly or in a restricted form.
 
@@ -728,12 +735,12 @@ We list the threats we consider most likely to invalidate or narrow the conclusi
 
 Phase 0 tests the assumptions most likely to sink the project before the expensive work begins. Each step has a kill or pivot criterion.
 
-| Week | Step                                                                                           | Kill / pivot criterion                                                                                                        |
-|:-----|:-----------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|
-| 1    | Read \[1\] in full; systematic literature review across robotics, ML and terramechanics venues | Direct prior work on learned, dynamics-conditioned recoverability for rovers $\Rightarrow$ narrow the contribution claims     |
-| 1    | Hardware audit: motors, drivers, encoders, IMU, computer, current sensing at $\ge 50$ Hz       | No current sensing and none can be added $\Rightarrow$ drop H3 and probing; narrow the claims                                 |
-| 2    | H1 pilot with the tuned classical controller, 20 runs each in cells C and D                    | No difference in trap rate $\Rightarrow$ pivot to the self-rescue framing (loose soil and wheel faults, no Earth-test claim)  |
-| 3    | Tier 1 throughput and Tier 2 single-wheel runtime on the development machine                   | Tier 1 below gate $\Rightarrow$ reduce label budget or rent compute; Tier 2 too slow $\Rightarrow$ use it for evaluation only |
+| Week | Step                                                                                           | Kill / pivot criterion                                                                                                                                                                                                                           |
+|:-----|:-----------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1    | Read \[1\] in full; systematic literature review across robotics, ML and terramechanics venues | Direct prior work on learned, dynamics-conditioned recoverability for rovers $\Rightarrow$ narrow the contribution claims                                                                                                                        |
+| 1    | Hardware audit: motors, drivers, encoders, IMU, computer, current sensing at $\ge 50$ Hz       | No current sensing and none can be added $\Rightarrow$ drop H3 and probing; narrow the claims                                                                                                                                                    |
+| 2    | H1 pilot with the tuned classical controller, 20 runs each in cells C and D                    | Early GO only if significant at $\alpha=0.01$; otherwise extend C and D to 40 runs each and test at $\alpha=0.04$. No difference after stage 2 $\Rightarrow$ pivot to the self-rescue framing (loose soil and wheel faults, no Earth-test claim) |
+| 3    | Tier 1 throughput and Tier 2 single-wheel runtime on the development machine                   | Tier 1 below gate $\Rightarrow$ reduce label budget or rent compute; Tier 2 too slow $\Rightarrow$ use it for evaluation only                                                                                                                    |
 
 Phase 0 steps and kill criteria.
 
@@ -997,10 +1004,29 @@ The Phase 0 gate decides between the Earth-test-bias framing and the self-rescue
 
 33. S. Chitta *et al.*, “ros_control: A generic and simple control framework for ROS,” *J. Open Source Softw.*, vol. 2, no. 20, p. 456, 2017.
 
+34. M. H. Promit, C. Chakma, M. J. A. Sourov, and S. Rahman, “Escape without a recipe: Maneuver-agnostic Mars rover recovery from granular entrapment,” 2026, *arXiv:2610.24827*.
+
+35. S. Shrivastava, A. Karsai, Y. O. Aydin, R. Pettinger, W. Bluethmann, R. O. Ambrose, and D. I. Goldman, “Material remodeling and unconventional gaits facilitate locomotion of a robophysical rover over granular terrain,” *Sci. Robot.*, vol. 5, no. 42, 2020, Art. no. eaba3499.
+
+36. A. Karsai *et al.*, “Real-time remodeling of granular terrain for robot locomotion,” *Adv. Intell. Syst.*, 2022, doi: 10.1002/aisy.202200119.
+
+37. K. Yoshida, T. Watanabe, N. Mizuno, and G. Ishigami, “Terramechanics-based analysis and traction control of a lunar/planetary rover,” in *Field and Service Robotics*, Springer Tracts in Advanced Robotics, vol. 24, 2006, pp. 225–234.
+
+38. A. Albinsson, F. Bruzelius, B. Jacobson, and J. Fredriksson, “Design of tyre force excitation for tyre–road friction estimation,” *Veh. Syst. Dyn.*, vol. 55, no. 2, pp. 208–230, 2017.
+
+39. Z. Liang *et al.*, “High-slip-ratio control for peak tire-road friction estimation using automated vehicles,” 2026, *arXiv:2603.09073*.
+
+40. M. Scheffer *et al.*, “Early-warning signals for critical transitions,” *Nature*, vol. 461, pp. 53–59, 2009.
+
+41. J. J. van Beers, M. Scheffer, P. Solanki, I. A. van de Leemput, E. H. van Nes, and C. C. de Visser, “Early warning signals for loss of control,” 2025, *arXiv:2512.20868*.
+
+42. J. van Beers, D.-H. Kim, P. Solanki, and C. de Visser, “Indicators of resilience for autonomous control systems,” 2026, *arXiv:2609.18264*.
+
+43. R. Azuma, T. Maeda, K. Horie, S. Miyai, S. Sugimura, and G. Ishigami, “Drawbar pull experiment and analysis of grousered-track unit on sandy terrain,” in *Proc. 55th Conf. Int. Soc. Terrain-Vehicle Syst. (ISTVS)*, 2025, doi: 10.56884/Z4B59GCP.
+
 [^1]: S. G is with the Department of Computer Science and Engineering (AI & ML), Maharaja Institute of Technology Mysore, Karnataka, India (e-mail: \[add\]).
 
 [^2]: **Status of this manuscript:** research proposal with a pre-registered experimental protocol. No experimental results are reported. All result tables are intentionally empty and will be filled only with measured data.
-
 
 ---
 
@@ -1044,7 +1070,7 @@ The Phase 0 gate decides between the Earth-test-bias framing and the self-rescue
 
 **Resolved (2026-11-09):** the trial-count mismatch is settled by the two-stage design above, in both the paper and SPEC.md.
 
-## C. Prior art found after the paper was written (add to Section 2)
+## C. Prior art found after the first draft (now cited in Section 2)
 
 | Work | What it does | Overlap with ORION | Difference |
 |---|---|---|---|
