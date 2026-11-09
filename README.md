@@ -128,7 +128,10 @@ ros2 launch orion_bringup gazebo.launch.py
 # 🎮 Teleoperation
 
 ```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
+# Every command goes through twist_mux (docs/INTERFACES.md). Jazzy's diff_drive_controller
+# only accepts TwistStamped, so publish stamped on the teleop input (priority 200):
+ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+  --ros-args -p stamped:=true -r cmd_vel:=/cmd_vel/teleop
 ```
 
 Keyboard Controls

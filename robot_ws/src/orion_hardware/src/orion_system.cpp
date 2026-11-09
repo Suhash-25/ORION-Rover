@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -133,6 +134,12 @@ bool OrionSystem::handshake()
   RCLCPP_INFO(
     get_logger(), "Firmware %08x, protocol v%u, param crc %04x",
     pong->fw_git_hash, pong->proto_ver, pong->param_crc);
+  {
+    char hash[9];
+    std::snprintf(hash, sizeof(hash), "%08x", static_cast<unsigned>(pong->fw_git_hash));
+    std::lock_guard<std::mutex> lock(link_mutex_);
+    fw_git_hash_ = hash;
+  }
 
   const std::pair<uint8_t, double> push[] = {
     {op::param_id::kEncoderCpr, drive_.encoder_cpr},
@@ -349,10 +356,12 @@ void OrionSystem::publish_health()
 {
   std::shared_ptr<FirmwareLink> l;
   rclcpp::Publisher<orion_msgs::msg::RoverHealth>::SharedPtr pub;
+  std::string fw_hash;
   {
     std::lock_guard<std::mutex> lock(link_mutex_);
     l = link_;
     pub = health_pub_;
+    fw_hash = fw_git_hash_;
   }
   if (!l || !pub) {
     return;
@@ -373,6 +382,7 @@ void OrionSystem::publish_health()
   h.crc_errors = host.rx_crc_errors + host.rx_framing_errors +
     (fw ? fw->rx_crc_errors + fw->rx_framing_errors : 0u);
   h.watchdog_trips = fw ? fw->watchdog_trips : 0u;
+  h.fw_git_hash = fw_hash;
   h.current_sensed = true;
   for (const auto & j : joints_) {
     h.duty[j.motor_index] = static_cast<float>(

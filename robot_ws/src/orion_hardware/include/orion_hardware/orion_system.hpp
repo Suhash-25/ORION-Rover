@@ -79,6 +79,7 @@ private:
 
   mutable std::mutex link_mutex_;  // guards link_ against the executor thread (callbacks)
   std::shared_ptr<FirmwareLink> link_;
+  std::string fw_git_hash_;  // from the PONG handshake, guarded by link_mutex_
   std::atomic<bool> active_{false};
   std::atomic<bool> estop_requested_{false};
 

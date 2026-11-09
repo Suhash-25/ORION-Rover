@@ -193,6 +193,7 @@ def test_rover_health_is_published(stack):
     h = msgs[-1]
     assert h.battery_v == pytest.approx(12.0)
     assert h.current_sensed
+    assert h.fw_git_hash == '0fa4e000'  # FakeFirmware's default PONG hash
     assert h.fw_fault_flags & p.FAULT_WATCHDOG == 0
     assert h.duty[0] > 0
 

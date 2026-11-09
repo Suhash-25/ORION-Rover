@@ -102,6 +102,7 @@ def test_baseline_drives_reports_and_stops_on_stale_safety(ros):
     status = [m for _, m in feeder.got['status']]
     assert {s.mode for s in status} == {PolicyStatus.MODE_BASELINE}
     assert status[-1].obs_spec_hash == obs_spec.OBS_SPEC_HASH and status[-1].policy_sha == ''
+    assert status[-1].critic_gating  # default on
     stamps = [t for t, _ in feeder.got['status']]
     rate = (len(stamps) - 1) / (stamps[-1] - stamps[0])
     assert 15.0 < rate < 25.0, f'PolicyStatus at {rate:.1f} Hz'
@@ -132,7 +133,8 @@ def test_policy_mode_with_onnx_artefact(ros, tmp_path):
     assert call_set_mode(feeder, ex, PolicyStatus.MODE_POLICY).success
     spin(ex, 1.0)
     status = feeder.got['status'][-1][1]
-    assert status.mode == PolicyStatus.MODE_POLICY
+    assert 0.0 <= status.entrapment_risk <= 1.0
+    assert not status.critic_gating  # parameter reaches the status message
     assert status.policy_sha == node.core.policy.policy_sha and len(status.policy_sha) == 16
     assert 0.0 <= status.entrapment_risk <= 1.0
     assert any(status.latent)
