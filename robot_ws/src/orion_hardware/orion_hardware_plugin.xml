@@ -1,0 +1,10 @@
+<library path="orion_hardware">
+  <class name="orion_hardware/OrionSystem"
+         type="orion_hardware::OrionSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      ORION wheel firmware over a serial link: 4 velocity-commanded wheels, position/velocity/
+      effort (A) state, RoverHealth at 10 Hz, e-stop forwarding (docs/PROTOCOL.md).
+    </description>
+  </class>
+</library>

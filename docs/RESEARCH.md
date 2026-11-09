@@ -56,7 +56,7 @@ ORION is a four-wheel skid-steer research rover (ROS 2 Jazzy, Gazebo Harmonic, `
 
 1. **Hardware list is still unknown.** Most important: can motor current be logged at ≥50 Hz? Can encoders and the IMU be logged at ≥100 Hz? The first decides H3 and probing. The second decides tipping-point sensing.
 2. **Novelty is not proven.** It rests on targeted searches, not a systematic review. Phase 0 week 1 is the review.
-3. **Paper TODOs:** author email, acknowledgment, JPL citation for Opportunity at "Purgatory", hardware [TBD] values in Table II, and the four new prior-art papers in Part 2C.
+3. **Paper TODOs:** author email, acknowledgment, JPL citation for Opportunity at "Purgatory", hardware [TBD] values in Table II, and (the Part 2C prior art is now cited).
 4. ~~Trial count mismatch~~ resolved: two-stage H1 design (Part 2B).
 
 ## 0.6 Project history (how the concept evolved)
@@ -87,7 +87,7 @@ ORION is a four-wheel skid-steer research rover (ROS 2 Jazzy, Gazebo Harmonic, `
 
 Suhas G, Department of Computer Science and Engineering (AI & ML), Maharaja Institute of Technology Mysore, Karnataka, India.
 
-*Converted from the LaTeX source. Citation numbers refer to the References list at the end of Part 1. Section numbers follow the PDF: 1 Introduction, 2 Related Work, 3 Problem, 4 Method, 5 Simulation, 6 Hardware, 7 Evaluation, 8 Design Rationale, 9 Threats, 10 Plan, 11 Conclusion, then the Appendices.*
+*Converted from the LaTeX source (27 pages). Citation numbers refer to the References list at the end of Part 1. Section numbers follow the PDF: 1 Introduction, 2 Related Work, 3 Problem, 4 Method, 5 Simulation, 6 Hardware, 7 Evaluation, 8 Design Rationale, 9 Threats, 10 Plan, 11 Conclusion, then the Appendices.*
 
 ## Abstract
 
@@ -155,6 +155,8 @@ Two strands of work address non-geometric hazards. The first estimates terrain p
 
 The second strand detects entrapment. Qiu \[9\] proposed a naive Bayes entrapment detector for planetary rovers. Detection is a necessary ingredient, but a detector that fires once the rover is already trapped arrives too late. Our recoverability margin is intended to fire *before* the boundary is crossed, and to be conditioned on the inferred soil and gravity.
 
+Two further strands address what happens once the rover is embedded. Promit *et al.* \[34\] train a recurrent policy in a continuum (material point method) simulation to escape granular entrapment without a scripted maneuver. They report 62.5% mean escape across seeds against 7 of 32 trials for the best of ten scripted controllers, and note that physical transfer is unverified. From the published abstract, the work does not predict entrapment before it occurs and does not treat reduced gravity. Its learned escape is complementary to our fixed escape library, which we keep fixed for reproducible margin labels (Section 8). Goldman and colleagues showed that a wheel-legged rover can deliberately remodel granular terrain to free itself and climb loose slopes \[35, 36\]. Finally, Yoshida *et al.* \[37\] defined terramechanics-based traction and slip margins for traction control of a lunar rover. Their margins are computed from a soil model; under the Earth-test bias, such a model inherits the optimistic calibration that this proposal is concerned with.
+
 ### Terramechanics and Reduced-Gravity Testing
 
 Classical terramechanics models wheel–soil interaction with semi-empirical pressure–sinkage and shear–displacement relations \[4, 5\]. Their parameters are fitted from bevameter and soil-bin measurements on Earth. Discrete-element and continuum granular models can capture effects outside the range of those fits, at much greater computational cost. Project Chrono \[31\] is an open-source multi-physics engine that includes deformable terrain models of both kinds.
@@ -175,25 +177,30 @@ In robotics, Nagabandi *et al.* \[20\] meta-learned dynamics models that adapt o
 
 Constrained Markov decision processes \[27\] and constrained policy optimization \[28\] formalize safety as expected-cost constraints, which is not the same as avoiding a single irreversible event. Leave No Trace \[23\] learns a reset policy alongside the forward policy and aborts when the reset value predicts that the agent cannot return. It is the closest antecedent of our recoverability margin, but it is not meta-learned across dynamics and assumes a single environment. Single-life RL \[22\] formalizes completing a novel task in one episode without resets using prior experience, and proposes Q-weighted adversarial learning (QWALE) to steer back toward familiar states. Plaut *et al.* \[24\] give regret guarantees under irreversible dynamics when the agent can ask a mentor for help. Sorstkins *et al.* \[25\] add a learned reversibility signal and selective rollback to value-based RL. Cho and Sun \[26\] propose constrained meta-RL with differentiable convex programming to maintain safety constraints during adaptation.
 
+### Active Excitation and Early-Warning Signals
+
+Two lines of work outside planetary robotics bear on measuring, rather than predicting, how close a vehicle is to losing traction. In automotive research, torque is deliberately added to wheels to excite tire forces and estimate tire–road friction \[38\], and automated vehicles have been controlled into high slip to observe the peak of the friction curve \[39\]. These methods target cars on rigid roads and fit a tire model. In dynamical systems, a system approaching a fold bifurcation recovers ever more slowly from small perturbations. This critical slowing down underlies early-warning signals for critical transitions \[40\], and it has recently been used as a model-free warning of loss of control in drones \[41, 42\]. On loose soil, the drawbar pull–slip curve has a peak beyond which slip rises sharply \[43\], which suggests that entrapment may approach as a fold of this kind. We found no work that applies active excitation or critical slowing down to wheel–soil entrapment, or that uses such a measured signal inside meta-RL. We treat this as a candidate extension, gated by its own Phase 0 test (Section 10), not as part of the core claims.
+
 ### Gap Analysis
 
 Table 1 positions the proposal against the closest work. The gap is not any single ingredient; each exists. The gap is their combination in a form that addresses a documented failure mode of a real engineering process.
 
-|                              |                     |                 |           |              |             |             |
-|:-----------------------------|:-------------------:|:---------------:|:---------:|:------------:|:-----------:|:-----------:|
-| Work                         |    Meta-learned     | Irreversibility |  Gravity  |  Soil-side   | Mid-episode |    Real     |
-|                              |     adaptation      |     modeled     |  varied   | gravity bias |   change    |  hardware   |
-| Hu *et al.* 2025 \[1\]       |         no          |       no        |    yes    |     yes      |     no      |  lab tests  |
-| Bouton *et al.* 2026 \[12\]  |         no          |       no        |    no     |      no      | not stated  |     yes     |
-| Omi *et al.* 2023 \[10\]     | partial (recurrent) |       no        |    no     |      no      |     yes     |     no      |
-| MAGIC-VFM 2024 \[11\]        |     yes (model)     |       no        |    no     |      no      | not stated  |     yes     |
-| Arm *et al.* 2025 \[13\]     |         no          |       no        |    yes    |      no      |     no      |     yes     |
-| Banerjee *et al.* 2020 \[8\] |     yes (model)     |       no        |    no     |      no      | not stated  | not stated  |
-| RMA 2021 \[19\]              |       partial       |       no        |    no     |      no      |     yes     |     yes     |
-| Single-life RL 2022 \[22\]   |   no (prior data)   |     partial     |    no     |      no      |     n/a     | not stated  |
-| Leave No Trace 2018 \[23\]   |         no          |       yes       |    no     |      no      |     no      |     no      |
-| Plaut *et al.* 2026 \[24\]   |         no          |  yes (theory)   |    no     |      no      |     n/a     |     no      |
-| **This proposal**            |         yes         |       yes       | yes (sim) |     yes      |     yes     | yes (Earth) |
+|                              |                     |                  |           |              |             |             |
+|:-----------------------------|:-------------------:|:----------------:|:---------:|:------------:|:-----------:|:-----------:|
+| Work                         |    Meta-learned     | Irreversibility  |  Gravity  |  Soil-side   | Mid-episode |    Real     |
+|                              |     adaptation      |     modeled      |  varied   | gravity bias |   change    |  hardware   |
+| Hu *et al.* 2025 \[1\]       |         no          |        no        |    yes    |     yes      |     no      |  lab tests  |
+| Bouton *et al.* 2026 \[12\]  |         no          |        no        |    no     |      no      | not stated  |     yes     |
+| Omi *et al.* 2023 \[10\]     | partial (recurrent) |        no        |    no     |      no      |     yes     |     no      |
+| MAGIC-VFM 2024 \[11\]        |     yes (model)     |        no        |    no     |      no      | not stated  |     yes     |
+| Arm *et al.* 2025 \[13\]     |         no          |        no        |    yes    |      no      |     no      |     yes     |
+| Banerjee *et al.* 2020 \[8\] |     yes (model)     |        no        |    no     |      no      | not stated  | not stated  |
+| RMA 2021 \[19\]              |       partial       |        no        |    no     |      no      |     yes     |     yes     |
+| Single-life RL 2022 \[22\]   |   no (prior data)   |     partial      |    no     |      no      |     n/a     | not stated  |
+| Leave No Trace 2018 \[23\]   |         no          |       yes        |    no     |      no      |     no      |     no      |
+| Plaut *et al.* 2026 \[24\]   |         no          |   yes (theory)   |    no     |      no      |     n/a     |     no      |
+| Promit *et al.* 2026 \[34\]  |    no (learned)     | partial (escape) |    no     |      no      |     n/a     |     no      |
+| **This proposal**            |         yes         |       yes        | yes (sim) |     yes      |     yes     | yes (Earth) |
 
 Positioning against the closest prior work, based on published abstracts and papers read for this proposal. “Partial” means the aspect is addressed indirectly or in a restricted form.
 
@@ -450,7 +457,7 @@ ORION is a four-wheel skid-steer rover with independently driven wheels, a senso
 
 - **A stall-safe drive train.** Repeated high-current operation in sand risks overheating motors and drivers. Firmware current limits, a thermal cutoff and a physical emergency stop are mandatory before any trial.
 
-**Ground-truth velocity.** Slip makes wheel odometry unreliable exactly when it matters. Ground-truth body velocity and displacement will be measured independently of the controller by an overhead camera tracking a fiducial marker on the rover, synchronized with ROS time. The controller’s own velocity estimate $\hat{\boldsymbol v}$ comes from fusing IMU and wheel odometry, and its error is logged as a secondary outcome.
+**Ground-truth velocity.** Slip makes wheel odometry unreliable exactly when it matters. Ground-truth body velocity and displacement will be measured independently of the controller by an overhead camera tracking a fiducial marker on the rover, synchronized with ROS time. The controller’s own velocity estimate $\hat{\boldsymbol v}$ comes from a one-dimensional Kalman filter that predicts with the gravity-compensated IMU acceleration and is corrected by body-speed fixes (the overhead camera, else lidar odometry); wheel odometry is never a speed source. Its confidence is $c = e^{-t_\text{fix}/3\,\text{s}} \cdot \operatorname{clip}(1 - \sigma_\text{KF}/0.1\,\text{m/s}, 0, 1)$, where $t_\text{fix}$ is the age of the last fix and $\sigma_\text{KF}$ the filter's standard deviation; the stuck rule trusts the speed without $c$ while the fix is younger than 0.5 s. The estimate's error against the camera is logged as a secondary outcome.
 
 ### Test Bed
 
@@ -497,7 +504,13 @@ Soil changes within a run are produced spatially: the route crosses from a compa
 
 ### Sample Size
 
-With four cells, five primary methods (Section 7) and a target of 20 runs per method per cell, the full study needs about 400 runs. At an estimated 10 minutes per run including bed preparation, this is about 67 hours of bin time. For H1, the planned comparison is between trap rates in cells C and D for a controller tuned in C. If the true trap rates are, for example, 10% and 40%, an exact calculation for a two-sided Fisher exact test at $\alpha = 0.05$ gives a power of about 0.49 with 20 runs per cell, 0.71 with 30 and 0.85 with 40. Twenty runs per cell is therefore under-powered for an effect of this size. For the H1 comparison we plan 40 runs in each of cells C and D, which adds 40 runs, about 7 hours of bin time. H1 is therefore tested in two pre-registered stages. Stage 1 is the Phase 0 pilot with 20 runs in each of the four cells; an early GO is declared only if the C–D difference is significant at $\alpha = 0.01$. Otherwise, stage 2 extends cells C and D to 40 runs each and tests at $\alpha = 0.04$, which keeps the overall false-positive rate at or below 0.05. A NO-GO is declared only after stage 2. These trap rates are illustrative assumptions, not predictions.
+With four cells, five primary methods (Section 7) and a target of 20 runs per method per cell, the full study needs about 400 runs. At an estimated 10 minutes per run including bed preparation, this is about 67 hours of bin time. For H1, the planned comparison is between trap rates in cells C and D for a controller tuned in C. H1 is tested in two pre-registered stages. Stage 1 is the Phase 0 pilot with 20 runs in each of the four cells: an early GO is declared if, for either loose cell (D, or B with full weight on loose soil), the failure rate is higher than in C with a one-sided Fisher exact test at $\alpha = 0.01$, or the effective speed is lower with a one-sided Mann–Whitney test at $\alpha = 0.01$. Otherwise stage 2 extends cells C and D to 40 runs each, which adds 40 runs, about 7 hours of bin time, and tests C against D once more at $\alpha = 0.04$. A NO-GO is declared only after stage 2. The effect sizes, the difference in failure rate with a Newcombe hybrid-score interval and the drop in median speed with a bootstrap interval, are reported next to the decision. Whether the decision should also require a minimum effect size (a rise of at least 0.25 or a speed drop of at least 30 %) is an open decision that will be fixed before the first stage-1 run (`docs/SPEC.md` §9).
+
+The power of this exact rule was estimated by simulating 20,000 complete two-stage sessions per scenario (`phase0_power`, fixed seed). If the true trap rates are, for example, 10 % in C and 40 % in D (and in B), the pre-registered rule (GO on the failure-rate test alone; effective speed is reported with its confidence interval but does not decide) declares GO with probability 0.91, and with probability 0.51 already at stage 1; if only D is affected, 0.89. When no cell differs, it declares a false GO with probability 0.017 at a 10 % trap rate and 0.029 at 30 %, inside the 0.05 bound. Letting the speed test decide as well would raise power only to 0.91–0.93 but push the false-GO rate to 0.062–0.063: splitting $\alpha$ into 0.01 and 0.04 bounds the error for one test per stage, and that variant runs four tests at stage 1 (two cells, two metrics) and two at stage 2; adding the minimum-effect-size requirement gives power 0.75–0.81 with a false-GO rate of at most 0.027. For reference only, a single two-sided Fisher exact test at $\alpha = 0.05$ on 10 % against 40 % has an exact power of 0.49 with 20 runs per cell, 0.71 with 30 and 0.85 with 40; these figures, quoted in earlier drafts, describe that plain test and not the implemented rule.
+
+Two further points are pre-registered. First, cell B differs from cell C in both weight and soil, so a GO that rests on cell B alone does not isolate the C-to-D transfer that H1 names; it is reported as a two-factor result. Second, a run that ends in a safety stop, for example a motor-current halt, counts as a failure. The current threshold is an estimate until the motor drivers are characterised, so the number of safety stops is reported per cell next to every test. These trap rates are illustrative assumptions, not predictions.
+
+For the main comparison, the engineering plan uses 25 runs per method per cell (`docs/SPEC.md` §8). A single per-cell comparison corrected over all 16 per-cell tests (Holm) then has a power of only 0.07 to detect 40 % against 20 % and 0.29 for 40 % against 10 %. The per-cell comparisons are therefore secondary. The pre-registered primary comparison pools the two loose-soil cells: the proposed controller against the tuned classical controller, 50 runs each, one-sided Fisher exact test at $\alpha = 0.05$, with power 0.64 for 40 % against 20 % and 0.96 for 40 % against 10 %.
 
 ### Safety
 
@@ -728,12 +741,12 @@ We list the threats we consider most likely to invalidate or narrow the conclusi
 
 Phase 0 tests the assumptions most likely to sink the project before the expensive work begins. Each step has a kill or pivot criterion.
 
-| Week | Step                                                                                           | Kill / pivot criterion                                                                                                        |
-|:-----|:-----------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|
-| 1    | Read \[1\] in full; systematic literature review across robotics, ML and terramechanics venues | Direct prior work on learned, dynamics-conditioned recoverability for rovers $\Rightarrow$ narrow the contribution claims     |
-| 1    | Hardware audit: motors, drivers, encoders, IMU, computer, current sensing at $\ge 50$ Hz       | No current sensing and none can be added $\Rightarrow$ drop H3 and probing; narrow the claims                                 |
-| 2    | H1 pilot with the tuned classical controller, 20 runs each in cells C and D                    | No difference in trap rate $\Rightarrow$ pivot to the self-rescue framing (loose soil and wheel faults, no Earth-test claim)  |
-| 3    | Tier 1 throughput and Tier 2 single-wheel runtime on the development machine                   | Tier 1 below gate $\Rightarrow$ reduce label budget or rent compute; Tier 2 too slow $\Rightarrow$ use it for evaluation only |
+| Week | Step                                                                                           | Kill / pivot criterion                                                                                                                                                                                                                           |
+|:-----|:-----------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1    | Read \[1\] in full; systematic literature review across robotics, ML and terramechanics venues | Direct prior work on learned, dynamics-conditioned recoverability for rovers $\Rightarrow$ narrow the contribution claims                                                                                                                        |
+| 1    | Hardware audit: motors, drivers, encoders, IMU, computer, current sensing at $\ge 50$ Hz       | No current sensing and none can be added $\Rightarrow$ drop H3 and probing; narrow the claims                                                                                                                                                    |
+| 2    | H1 pilot with the tuned classical controller, 20 runs each in cells C and D                    | Early GO only if significant at $\alpha=0.01$; otherwise extend C and D to 40 runs each and test at $\alpha=0.04$. No difference after stage 2 $\Rightarrow$ pivot to the self-rescue framing (loose soil and wheel faults, no Earth-test claim) |
+| 3    | Tier 1 throughput and Tier 2 single-wheel runtime on the development machine                   | Tier 1 below gate $\Rightarrow$ reduce label budget or rent compute; Tier 2 too slow $\Rightarrow$ use it for evaluation only                                                                                                                    |
 
 Phase 0 steps and kill criteria.
 
@@ -997,10 +1010,29 @@ The Phase 0 gate decides between the Earth-test-bias framing and the self-rescue
 
 33. S. Chitta *et al.*, “ros_control: A generic and simple control framework for ROS,” *J. Open Source Softw.*, vol. 2, no. 20, p. 456, 2017.
 
+34. M. H. Promit, C. Chakma, M. J. A. Sourov, and S. Rahman, “Escape without a recipe: Maneuver-agnostic Mars rover recovery from granular entrapment,” 2026, *arXiv:2610.24827*.
+
+35. S. Shrivastava, A. Karsai, Y. O. Aydin, R. Pettinger, W. Bluethmann, R. O. Ambrose, and D. I. Goldman, “Material remodeling and unconventional gaits facilitate locomotion of a robophysical rover over granular terrain,” *Sci. Robot.*, vol. 5, no. 42, 2020, Art. no. eaba3499.
+
+36. A. Karsai *et al.*, “Real-time remodeling of granular terrain for robot locomotion,” *Adv. Intell. Syst.*, 2022, doi: 10.1002/aisy.202200119.
+
+37. K. Yoshida, T. Watanabe, N. Mizuno, and G. Ishigami, “Terramechanics-based analysis and traction control of a lunar/planetary rover,” in *Field and Service Robotics*, Springer Tracts in Advanced Robotics, vol. 24, 2006, pp. 225–234.
+
+38. A. Albinsson, F. Bruzelius, B. Jacobson, and J. Fredriksson, “Design of tyre force excitation for tyre–road friction estimation,” *Veh. Syst. Dyn.*, vol. 55, no. 2, pp. 208–230, 2017.
+
+39. Z. Liang *et al.*, “High-slip-ratio control for peak tire-road friction estimation using automated vehicles,” 2026, *arXiv:2603.09073*.
+
+40. M. Scheffer *et al.*, “Early-warning signals for critical transitions,” *Nature*, vol. 461, pp. 53–59, 2009.
+
+41. J. J. van Beers, M. Scheffer, P. Solanki, I. A. van de Leemput, E. H. van Nes, and C. C. de Visser, “Early warning signals for loss of control,” 2025, *arXiv:2512.20868*.
+
+42. J. van Beers, D.-H. Kim, P. Solanki, and C. de Visser, “Indicators of resilience for autonomous control systems,” 2026, *arXiv:2609.18264*.
+
+43. R. Azuma, T. Maeda, K. Horie, S. Miyai, S. Sugimura, and G. Ishigami, “Drawbar pull experiment and analysis of grousered-track unit on sandy terrain,” in *Proc. 55th Conf. Int. Soc. Terrain-Vehicle Syst. (ISTVS)*, 2025, doi: 10.56884/Z4B59GCP.
+
 [^1]: S. G is with the Department of Computer Science and Engineering (AI & ML), Maharaja Institute of Technology Mysore, Karnataka, India (e-mail: \[add\]).
 
 [^2]: **Status of this manuscript:** research proposal with a pre-registered experimental protocol. No experimental results are reported. All result tables are intentionally empty and will be filled only with measured data.
-
 
 ---
 
@@ -1044,7 +1076,37 @@ The Phase 0 gate decides between the Earth-test-bias framing and the self-rescue
 
 **Resolved (2026-11-09):** the trial-count mismatch is settled by the two-stage design above, in both the paper and SPEC.md.
 
-## C. Prior art found after the paper was written (add to Section 2)
+### B2. Method differences between the paper (Part 1) and the code (council M8, 2026-11-09)
+
+Every place where Part 1 describes a method that the code (integration branch at commit 1d5c6ed, plus this round's fixes) does not implement, or implements differently. "Re-scope" means the paper text must be changed to describe what the code does before submission. "Future work" means the paper may keep the idea only as future work, not as a claim. Reviewers will check this; nothing in it may be left undisclosed.
+
+| # | Topic | Paper (Part 1) | Code | Verdict |
+|---|---|---|---|---|
+| 1 | Belief / adaptation | VariBAD: GRU posterior $q_\psi(z \mid h_t)$ with mean and variance, decoder of future transitions, KL to the previous posterior, auxiliary $\log p(c \mid z)$, learned forgetting gate (§4.2) | RMA-style: teacher PPO with a privileged encoder (10 functional traction descriptors → 8-D $z$); a student TCN regresses a **point** estimate $\hat z$ from a 40-step history by DAgger (`student.py`, `nets.py`). No posterior variance, no decoder, no forgetting gate | Re-scope: the core is RMA-style adaptation (SPEC F6); VariBAD is future work. Part 0.4 ("VariBAD-style is the core") does not describe the code |
+| 2 | Gating statistic | Lower $\alpha$-quantile of $M_\xi(s, z)$ over $N_z = 32$ posterior samples; Proposition 1 (§4.4, §8) | Fixed thresholds on the **point** critic output $\rho(o, \hat z)$ (`CriticGate`, `orion_policy/core.py`). No uncertainty enters the gate, so Proposition 1 does not apply | Re-scope, or add an uncertainty estimate (critic ensemble with quantile gating, council M8) and keep Prop. 1 for that variant only. The "mean margin" ablation does not exist |
+| 3 | What is predicted | Recoverability margin $m_c(s)$: probability that the best escape behaviour reaches the safe set within $H$ (Defs. 2–3) | Entrapment risk $\rho$ = P(hard-stuck or belly-out within $T_h = 10$ s), labelled by $K = 4$ branched rollouts of the escape library (`risk.py`); on hardware only calibrated (ECE, Brier) | Re-scope (already SPEC F1). H3 must be restated for $\rho$ |
+| 4 | Gate thresholds | Tuned by Lagrangian relaxation of the chance constraint over a $(m_\text{low}, m_\text{high}, \alpha)$ grid (§4.4) | Fixed: $\rho < 0.3$ explore, 0.3–0.5 cap 0.2 m/s and probe, 0.5–0.7 retreat, > 0.7 escape (SPEC §6) | Re-scope; tuning is future work |
+| 5 | Modes | Drive / Cautious (envelope shrinks linearly with the margin) / Probe / Escape | Explore / probe band (fixed 0.2 m/s cap) / **retreat** (reverse along the recorded entry path on the rover; straight reverse at 0.15 m/s in `CriticGate`) / Escape | Re-scope; retreat is new and must be described |
+| 6 | Probing ("wheels as instruments") | Three probe macro-actions (single-wheel torque pulse, in-place wiggle, brief reverse), 0.5–1.5 s, valued by a learned $V_\text{probe}$ = information gain − energy − margin cost (§4.5) | One fixed probe: 0.1 m/s straight for 1 s on entry to the 0.3–0.5 band, at most every 5 s (`orion_policy/sequences.py`). No value function, no information gain; in simulation the gate only caps the speed in that band | Future work. The probing part of Contribution 2 and the "no probing" ablation cannot be claimed |
+| 7 | Escape library | Five parameterised behaviours (reverse along own track, rocking, alternating wheel pulsing, low-torque creep, pivot-out), chosen with parameters by a context-conditioned selector (§4.6, App. C) | One shared library is being built in `learning/orion_learning/escape_library.py` (council B3); before it, the simulator had 4 fixed twist manoeuvres cycled in order (straight reverse, rocking, forward wiggle, reverse S-arc) and the rover one 7.5 s sequence. Twist-level only, so alternating wheel pulsing and low-torque creep cannot be expressed; no selector | Re-scope to the shared library as built; the selector and per-wheel behaviours are future work |
+| 8 | Action space | Four wheel angular-velocity set-points through a forward-command controller, plus macro-actions (§3.5, Integration section) | $(v, \omega)$ twist in $[-1, 1]^2$, rate-limited, scaled to SafetyStatus limits, through twist_mux to `diff_drive_controller` (SPEC §3) | Re-scope; the Part 0.7 rule on wheel-velocity commands does not describe the code |
+| 9 | Observations / velocity estimate | $\omega$, current, previous action, commanded twist, IMU, roll/pitch, and $\hat v$ fused from IMU and wheel odometry (§3.5, §6.1) | 20 floats (SPEC §3): previous command, wheel speeds and efforts (amps on hardware), accelerations, yaw rate, roll, pitch, body speed from a camera / lidar Kalman filter (wheel odometry is never a speed source), its confidence $e^{-t_\text{fix}/3}\,\operatorname{clip}(1 - \sigma_\text{KF}/0.1, 0, 1)$, side slip, effort-residual sinkage proxy | Re-scope the observation paragraph (§3.5); the §6.1 velocity sentence is updated in this file |
+| 10 | Training procedure | Joint meta-training of encoder, margin, probe value and policy; PPO on one-life truncated rollouts with the gate in the loop; aggressive data policy $p_\text{agg}$; label refreshes (Algorithm 1) | Sequential: teacher PPO, then student DAgger, then the critic on branched labels from student rollouts. The gate and the stuck → escape logic are not in the DAgger or critic collection loops (council M9) | Re-scope Algorithm 1 to the pipeline as built |
+| 11 | Reward | Twist tracking + energy + slip hinge + progress; **no trap penalty**, the one-life truncation does the work (§3.6) | +10 progress, +10 goal, −20 belly-out, −10 hard-stuck, −0.02 per step, slip², sinkage proxy, action smoothness, −5 for leaving the fence (SPEC §6, GUESS weights) | Re-scope |
+| 12 | Gravity decomposition | $g_r$ and $g_s$ sampled independently from $\{1.62, 3.71, 9.81\}$ ± 10 % (§4.7, Table 3); coupled-offset diagnostic and ablation | One $g \sim$ LogU(1.62, 9.81) sets both the weight and the soil coupling $k_{\phi,\text{eff}} = k_\phi (g/9.81)^\beta$, $\beta \sim U(0, 1)$. The gravitational-offset condition $(g_\star, g_\oplus)$ cannot be represented, so $\Delta J$ (Def. 1) cannot be computed in simulation | Re-scope, or add a separate soil-side $g_s$ to the environment (future work). Until then the "gravity split" of Contribution 1 is not implemented |
+| 13 | Simulator tiers | Tier 1 MuJoCo + Bekker–Wong with a $g_s$-dependent surrogate $f_\chi$ fitted to Tier 2 (Chrono); headline results on Tier 2 (§5, T1) | One NumPy simulator: simplified Bekker / Janosi–Hanamoto, slip-sinkage GUESS with a dig rate, randomised model-form multipliers (SPEC §6). No Tier 2, no $f_\chi$ | Re-scope (SPEC F2); the T1 mitigation "every headline result on Tier 2" is not available |
+| 14 | Condition distribution | Slopes 0–15°, wheel health $\{1, 0.6, 0.3, 0\}$ including two-wheel faults, 0–3 soil switches, 35 training / 8 held-out conditions outside the convex hull (§5.5) | Flat sandbox; one wheel at $\times U(0.3, 1)$ torque with p = 0.2; one loose patch (being redesigned, council B1); fresh random draws per episode, no 35/8 manifest | Re-scope or future work |
+| 15 | Trap and trial definitions | Trap: < 2 cm displacement in 10 s with wheels commanded; irreversible if the library fails within 60 s; 180 s trial over 2 m + 90° arc + slope in a 3 × 1.5 m bin (§6.4) | Rover: stuck = commanded > 0.1 m/s and body < 0.03 m/s for 3 s (or slip > 0.8); ENTRAPPED = < 0.1 m in 20 s while stuck; 60 s trial, 1.5 m straight, 2 × 2 m sandbox. Sim: < 0.02 m/s for 10 s, or belly-out at 8 cm sinkage. Calibration labels count from the stuck onset (council M2) | Re-scope §6.4 |
+| 16 | H1 test | Trap rate C vs D, falsified if not significant at $\alpha = 0.05$ over 40 runs each (§7.1) | Two-stage 0.01 / 0.04 (Sample Size above); failure = timeout, entrapment or safety stop; plus an effective-speed test; cell B also tested at stage 1 | Re-scope the H1 sentence of §7.1 to the two-stage rule |
+| 17 | H2 and H3 metrics | H2: ≥ 50 % fewer irreversible events at ≤ 15 % speed loss against each baseline; H3: ROC-AUC ≥ 0.8 with ≥ 2 s lead time (§7.1) | The analysis tests failure rate only (pooled primary + Holm secondaries); calibration is reliability, ECE and Brier. No speed-loss test, no ROC-AUC or lead time yet | Future work in `orion_experiments/analysis.py`, before Phase 4 |
+| 18 | Baselines and ablations | Tuned classical, PPO-DR, RMA-style, recurrent TD3, MAML-PPO (QWALE optional); six ablations (§7.2–7.3) | B0 (cruise 0.3 m/s + slip governor + escape), B1 oracle teacher (sim only), B2 robust PPO without $z$ (≈ PPO-DR), B3 student without critic gating (≈ RMA-style, ≈ "no gating"), student + critic. No TD3, no MAML-PPO, no other ablation | Re-scope H2 to the implemented baselines; the rest is future work |
+| 19 | Hardware design details | 20 runs per method per cell, 5 methods; weight ratio ≤ 0.5; bulk-density core and cone penetrometer at 3 depths (§6.3, App. D) | 25 per cell, 4 controllers (400 trials); "heavy" = +8 kg ballast (GUESS); 1 kg drop cone at 3 points with per-cell bands | Re-scope |
+| 20 | Mid-run changes on hardware | Software wheel-fault injection at a random time (§6.5) | Not implemented in the trial runner | Future work |
+| 21 | Label budget | 5 behaviours × 3 repeats × $H$ = 30 s per label (§8, App. B) | $K = 4$ branches × $T_h$ = 10 s | Re-scope the budget paragraph |
+
+**The learning simulator is uninformative on H1 by construction (council M1).** In the fixed sandbox cells of the simulator, the B0 outcome in both loose cells flips from 100 % success (speed drops of 11 % and 16 %) to 100 % hard-stuck as the loose-soil slip-sinkage coefficient $a_s$, a GUESS, goes from 0.5 to 1.0. The simulator can therefore be tuned to show any H1 result. Simulated H1 numbers are reported only as a sensitivity curve over $a_s$, and the earlier "−17 % effective speed" figure is withdrawn. The hardware kill test is the only evidence for H1.
+
+## C. Prior art found after the first draft (now cited in Section 2)
 
 | Work | What it does | Overlap with ORION | Difference |
 |---|---|---|---|

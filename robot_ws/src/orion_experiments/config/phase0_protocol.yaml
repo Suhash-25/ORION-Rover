@@ -1,0 +1,17 @@
+# Phase-0 kill test, stage 1 (SPEC section 8, pre-registered): B0 tuned on light-packed, 20 trials in
+# each of the 4 cells, blocked randomisation.
+#   ros2 run orion_experiments plan_session phase0_protocol.yaml --csv phase0_plan.csv
+session: phase0
+seed: 20261109
+cells: [light-packed, light-loose, heavy-packed, heavy-loose]
+controllers: [B0]
+n: 20
+randomisation: blocked
+duration_s: 60
+# Drop-cone depth bands per cell (1 kg cone, mm). GUESS until the sandbox soil is
+# characterised; a trial whose 3 readings fall outside its band is excluded from analysis.
+cone_depth_band_mm:
+  light-packed: [5.0, 15.0]
+  heavy-packed: [5.0, 15.0]
+  light-loose: [25.0, 60.0]
+  heavy-loose: [25.0, 60.0]

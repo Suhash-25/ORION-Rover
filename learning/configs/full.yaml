@@ -1,0 +1,71 @@
+# Full training run (do not run in CI). Sizes for a 16-32 vCPU cloud box; see README.md for
+# the compute estimate. Env = the B1 training distribution; evaluation = SPEC section 6.
+name: full
+seed: 0
+torch_threads: 4
+env: {}                      # EnvConfig overrides; {} = training distribution (env.py, B1)
+# Training distribution (council B1): rejection threshold on peak steady DP/W annealed from
+# env.dp_threshold[0] = 0.08 to [1] = 0.0 over this fraction of each PPO stage.
+dp_curriculum_fraction: 0.3333
+# Pre-registered target: fraction of training episodes B0 completes (logged every PPO
+# iteration as b0_completable by a shadow B0 rollout; summary.json says if the mean is in).
+b0_completable_band: [0.4, 0.6]
+b0_monitor: {num_envs: 32, steps_per_iter: 256, window: 256}
+
+teacher:                       # ~200 M env steps
+  num_envs: 512
+  rollout_steps: 256
+  iterations: 1500
+  epochs: 5
+  minibatches: 8
+  lr: 3.0e-4
+  gamma: 0.99
+  lam: 0.95
+  clip: 0.2
+  ent_coef: 0.001
+  hidden: [256, 256, 128]
+  encoder_hidden: [64, 64]
+  init_log_std: -0.5
+
+student:                       # 40 x 512 x 1000 = 20 M steps of DAgger data collection
+  num_envs: 512
+  iterations: 40
+  steps_per_iter: 1000
+  epochs: 4
+  batch_size: 1024
+  lr: 1.0e-3
+  channels: 32
+  beta0: 1.0
+  max_dataset: 300000
+
+critic:                        # ~60 k labelled states, x5 branches x 200 steps = ~50 M steps
+  num_envs: 512
+  rollout_steps: 1200
+  sample_every: 60
+  warmup_steps: 40
+  rounds: 6
+  holdout_rounds: 2
+  branches: 5   # one per escape manoeuvre in orion_learning.escape_library.E
+  horizon_s: 10.0
+  epochs: 40
+  batch_size: 1024
+  lr: 1.0e-3
+  hidden: [128, 128]
+
+b2:                            # same budget and network as the teacher, no latent
+  num_envs: 512
+  rollout_steps: 256
+  iterations: 1500
+  epochs: 5
+  minibatches: 8
+  lr: 3.0e-4
+  gamma: 0.99
+  lam: 0.95
+  clip: 0.2
+  ent_coef: 0.001
+  hidden: [256, 256, 128]
+  init_log_std: -0.5
+
+evaluate:
+  trials: 25
+  controllers: [B0, B2, student, student+critic, teacher]

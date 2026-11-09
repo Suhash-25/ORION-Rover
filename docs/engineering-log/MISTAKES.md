@@ -56,3 +56,49 @@ Format: what happened → root cause → lesson → guard now in place.
 - **Lesson:** a green run with zero tests is not a pass; always read the test count.
 - **Guard:** `extras_require={'test': ['pytest']}` in every ament_python setup.py; CI prints
   `colcon test-result --verbose` with counts.
+
+## M-009 Told the user the wrong GitHub account to give access to
+- **What:** we asked the user to add "suhasintern2" as a collaborator. The account Claude
+  actually pushes with in the cloud session was aidevops-1, so the access the user granted
+  could not help.
+- **Root cause:** we used the PR-attribution login as if it were the push identity, without
+  checking.
+- **Lesson:** check the identity before asking a human to change permissions: run
+  `gh api user --jq .login`.
+- **Cost:** about 10 minutes and two extra round trips with the user.
+
+## M-010 Temporary test shortcut outlived its reason
+- **What:** test_policy remapped /cmd_vel/policy straight to the controller "until twist_mux
+  is wired". After the merge, twist_mux was in the bringup too, so two publishers fed the
+  controller. The test still passed and hid it.
+- **Lesson:** every TEMPORARY gets an entry in the integration todo with its removal
+  condition, checked at each merge.
+
+## M-011 Recommended a statistical rule before simulating it
+- **What:** we put "drop the effect-size gate" to the user as the recommended option, while
+  speed was still a deciding metric. The simulation then showed a false-GO rate of 6.2 %.
+- **Root cause:** we reasoned that alpha splitting bounds the error, but that holds for one
+  test per look, and the rule runs 4 tests at stage 1.
+- **Lesson:** simulate the exact decision rule before recommending it. Never infer error rates
+  from the alpha bookkeeping alone.
+- **Caught by:** FIX-C's power simulation (`phase0_power`), before any trial was run.
+
+## M-012 Sim sensor noise set equal to the safety threshold it feeds
+- **What:** speed-fix noise was 1σ = 0.03 m/s, and the stuck threshold is |v| < 0.03 m/s. A
+  stalled rover passed the test on only ~85 % of steps, so the 3 s continuous hold almost never
+  completed. In sim, B0 never escaped and the critic never saw entrapment.
+- **Root cause:** the noise and the threshold were chosen separately. Nothing checked that the
+  rule could fire.
+- **Lesson:** every detection rule needs a test that it fires on a known-positive case under the
+  configured noise. That test also exposed a float bug in the monitor's hold timer.
+
+## M-013 Sim passed in the sandbox but segfaulted in CI (bridge_node at shutdown)
+- **What:** sim-smoke failed on GitHub in PRs 2-4. ros_gz_bridge's `clock_bridge.launch` runs
+  `bridge_node`, which exits -11 on SIGINT with the apt Jazzy build. The RoboStack build in the
+  sandbox shut it down cleanly.
+- **Fix:** bridge /clock through the existing `parameter_bridge`. Committed on pr1-green and
+  merged up into pr2-safety and integration, with no force push. The strict segfault check
+  stays.
+- **Lesson:** the sandbox is not CI. The sandbox uses conda builds and CI uses apt builds of
+  the same packages, so teardown behaviour can differ. Treat the first GitHub run as the real
+  verification, and keep the segfault check rather than loosening it.

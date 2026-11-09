@@ -46,3 +46,58 @@ spec had 4 × 20. Options: (a) keep 4 × 20, (b) 40 in every cell (160 runs, too
 extends C and D to 40 each and tests at α = 0.04; NO-GO only after stage 2. Paper and SPEC now
 agree. orion_experiments analysis must implement the two looks.
 Approved by the user (suhas) at 12:01: "yes do it".
+
+## D-009 Four stacked draft PRs, pushed from the user's PC (2026-11-09)
+The user asked for a PR when each section is complete. Sections:
+1. CI
+2. Make the stack build and drive, plus the Gazebo tests
+3. IMU, spec, messages, ground truth and the paper
+4. The software stack
+
+Each PR is based on the previous one, so each diff stays reviewable. The alternative, one
+48-commit PR, would be unreviewable. Section 1 is red on its own by design: it adds the gate
+before the fix. The cloud account (aidevops-1) has no access, so the push runs on the user's
+PC with their own credentials (suhasintern), with the user's approval ("remote control to vs
+code, and push from there").
+
+## D-010 WP4 physics deviations ratified (council verdict 2, 2026-11-09)
+- Dig-rate slip sinkage (sinkage grows with slipped rim travel) replaces SPEC's instantaneous
+  z_target. SPEC's version buried the rover 84 % of the way in 1 s, which is unphysical.
+  DIG_RATE is now a per-episode model-form parameter, LogU(0.03, 0.3) m/m (FIX-A).
+- The secant-implicit integrator is kept, with an energy test (body work ≤ motor work).
+
+## D-011 Training distribution ≠ evaluation distribution (council B1; FIX-A)
+Training uses:
+- a patch derived from the main soil draw, present with p = 0.5;
+- mixture rejection on analytic peak DP/W, with the curriculum threshold going from 0.08 to 0;
+- a restricted fraction of **0.4**, not the council's 0.7. With 0.7, B0 completed 69-78 % of
+  episodes, which is outside the pre-registered 40-60 % band. With 0.4 it completes 46-52 %.
+
+Evaluation keeps the SPEC ranges, where B0 succeeds about 9 % of the time. Effect: B0
+belly-out on training episodes fell from 86 % to 43 %, and the critic label mean from 0.72 to
+0.42.
+
+## D-012 Phase-0 decision: failure rate only, no effect-size gate (council M3; user-approved)
+FIX-C simulated the exact two-stage rule over 20 000 sessions:
+- GO on failures or speed: false GO 0.062-0.063, which breaks the promised 0.05.
+- The gated D-008 rule: power 0.75-0.81.
+- Failure-only, ungated (now the default): power 0.89-0.91, false GO 0.017-0.029.
+
+Speed is still reported with its CI. Switches: `--speed-in-decision`, `--effect-size-gate`.
+The first decision card recommended "drop the gate" with speed included. It was withdrawn
+after FIX-C's numbers came in, and replaced by a corrected card (M-011).
+Approved by the user (suhas) at 13:28 on the corrected card: "No gate, failure rate only". It
+is now pre-registered and must not change after the first stage-1 trial.
+
+## D-013 A controller give-up ends the trial ENTRAPPED (FINAL, implementer decision)
+orion_policy gives up after 3 failed escapes: IDLE, zero command. orion_safety's hard-stuck rule
+needs a command > 0.1 m/s, so it never fired and the trial ran to TIMEOUT. Now
+`PolicyStatus.escapes_exhausted` (new field) makes the trial runner end the trial ENTRAPPED,
+dated for the critic labels at the onset of the stuck episode (M2 anchor), and the sim counts
+it the same way (evaluate.py, critic branch labels). Failure rates are unchanged (TIMEOUT and
+ENTRAPPED are both failures); ENTRAPPED counts, time-to-entrapment and calibration labels
+change. Rejected: keep TIMEOUT (labels a stopped, trapped rover "safe" for the rest of the
+trial); keep creeping forward so the hard-stuck rule fires (drives into the trap on purpose and
+still needs 20 s more). Open for the user: whether critic-triggered give-ups (no FLAG_STUCK)
+stay in the calibration set; the analysis records `entrapment_source` so both can be reported.
+SPEC section 8.

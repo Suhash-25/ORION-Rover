@@ -1,0 +1,40 @@
+# orion_terrain/terrain_node parameters (docs/SPEC.md section 4).
+# Mirrors orion_terrain/params.py; test_params.py fails if the two drift apart.
+terrain_node:
+  ros__parameters:
+    sim: false                    # true in Gazebo: effort = joint torque (SIM_TORQUE)
+    # '' -> share/orion_terrain/config/effort_model_sim.yaml (sim) or effort_model.yaml
+    # (hardware, written by fit_effort_model; not shipped, so sinkage is refused until then)
+    effort_model_path: ''
+    # One joint per wheel in FL, FR, RL, RR order; /joint_states is mapped by NAME.
+    joint_names:
+      - front_left_wheel_joint
+      - front_right_wheel_joint
+      - rear_left_wheel_joint
+      - rear_right_wheel_joint
+    topics:
+      joint_states: /joint_states
+      imu: /imu/data
+      ground_truth_pose: /orion/ground_truth_pose
+      lidar_odom: /odom_rf2o
+      rover_health: /orion/rover_health
+      terrain_state: /orion/terrain_state
+
+    rate_hz: 20.0
+    # Body-speed Kalman filter on v_x. Its noise model (q 0.1 m/s^2, R 0.02 m/s camera,
+    # 0.05 m/s lidar), the confidence exp(-t_since_fix/3) * clip(1 - std/0.1, 0, 1), the 0.25 s
+    # low-pass and the effort-residual window are orion_learning.estimator constants (part of
+    # the obs_spec hash), not parameters.
+    initial_speed_std_mps: 0.1
+    gravity_mps2: 9.81
+    sg_window: 5                  # Savitzky-Golay window on ground-truth poses
+    # A source is used only while its newest fix is younger than this (s)
+    external_timeout_s: 0.25
+    lidar_timeout_s: 0.5
+    imu_timeout_s: 0.5
+    # Warn when a header stamp is > clock_skew_max_s off its receipt time for clock_skew_hold_s
+    # (external pose, IMU, joint states); at most once per clock_skew_warn_period_s per input.
+    clock_skew_max_s: 0.1
+    clock_skew_hold_s: 1.0
+    clock_skew_warn_period_s: 10.0
+    wheel_accel_tau_s: 0.05       # low-pass on dw/dt (also used by fit_effort_model)

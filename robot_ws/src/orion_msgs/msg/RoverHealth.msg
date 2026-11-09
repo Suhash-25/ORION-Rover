@@ -13,3 +13,4 @@ uint32 crc_errors            # cumulative frames dropped for bad CRC / framing
 uint32 watchdog_trips        # cumulative firmware watchdog trips
 float32[4] duty              # [-1, 1] PWM duty per wheel, FL FR RL RR
 bool current_sensed          # false when effort is estimated from duty instead of measured
+string fw_git_hash           # 8 hex digits of the firmware commit from the PONG handshake

@@ -1,0 +1,68 @@
+# orion_safety thresholds (docs/SPEC.md section 5, docs/SAFETY.md). Real rover values.
+# Every key is a field of orion_safety.monitor.SafetyConfig; test_config.py fails on a typo.
+# Floats must be written with a decimal point (ROS rejects 5 for a double parameter).
+orion_safety:
+  ros__parameters:
+    rate_hz: 50.0
+    clock_warn_after_s: 5.0        # warn while the node clock is still 0 (no /clock) this long
+    wheel_joints: [front_left_wheel_joint, front_right_wheel_joint,
+                   rear_left_wheel_joint, rear_right_wheel_joint]
+
+    # Limits when nothing is wrong: the policy's action range (SPEC section 3).
+    max_linear_speed: 0.5          # m/s
+    max_angular_speed: 1.0         # rad/s
+
+    # Tilt = max(|roll|, |pitch|) from /imu/data.
+    tilt_limited_deg: 18.0         # > this: LIMITED to the speeds below
+    tilt_limited_linear: 0.2       # m/s
+    tilt_limited_angular: 0.5      # rad/s
+    tilt_halt_deg: 25.0            # > this for tilt_halt_s: HALT, latched until reset
+    tilt_halt_s: 0.2
+
+    # Wheel current = /joint_states effort, AMPS on the rover.
+    # I_cont / I_peak are GUESSES until the motor drivers are known (SPEC section 9).
+    current_cont: 6.0              # A; > this for current_cont_s: LIMITED
+    current_cont_s: 2.0
+    current_limited_release_s: 2.0 # all wheels <= current_cont this long ends LIMITED
+    current_limited_linear: 0.3    # m/s while current-LIMITED
+    current_peak: 12.0             # A; > this for current_peak_s: HALT
+    current_peak_s: 0.3
+    current_cooldown_s: 5.0        # HALT ends this long after all wheels <= current_peak
+
+    # Host heartbeat. Required inputs: /joint_states, /imu/data.
+    joint_states_timeout_s: 0.3
+    imu_timeout_s: 0.5
+    startup_grace_s: 10.0          # an input never seen only trips HALT after this
+
+    # Optional inputs older than this are ignored (they never trip anything).
+    terrain_timeout_s: 0.5
+    pose_timeout_s: 0.5
+    command_timeout_s: 0.5
+    health_timeout_s: 1.0
+
+    # Geofence: 2 x 2 m sandbox in the ground-truth frame, flat [x0, y0, x1, y1, ...] in m.
+    # Poses on /orion/ground_truth_pose in any other frame are ignored (logged as an error).
+    geofence_frame: sandbox
+    geofence_enabled: true
+    geofence_polygon: [-1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0]
+    geofence_margin_m: 0.15
+    geofence_horizon_s: 1.0        # predicted pose this far ahead outside: LIMITED
+    geofence_limited_linear: 0.2   # m/s
+    geofence_limited_angular: 0.5  # rad/s
+    # Fallback when /orion/ground_truth_pose is absent: wheel odometry from a marked start
+    # pose [x, y, yaw rad] in the fence frame, with a wider margin because it drifts.
+    odom_extra_margin_m: 0.10
+    odom_start_pose: [-0.75, 0.0, 0.0]
+
+    # Stuck: flag only (orion_policy arms ESCAPE). Hard-stuck: HALT, outcome ENTRAPPED.
+    stuck_cmd_linear: 0.1          # m/s
+    stuck_body_speed: 0.03         # m/s
+    stuck_min_confidence: 0.3
+    stuck_fresh_fix_s: 0.5         # body-speed fix younger than this: confidence not needed
+    stuck_slip: 0.8
+    stuck_s: 3.0
+    hard_stuck_window_s: 20.0
+    hard_stuck_progress_m: 0.1
+
+    # RoverHealth.fw_fault_flags bits that HALT: ENCODER 4 | UNDERVOLTAGE 8 | ESTOP_LATCHED 16.
+    firmware_halt_mask: 28

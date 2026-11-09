@@ -10,6 +10,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SafetyStatus.msg"
   "msg/PolicyStatus.msg"
   "msg/RoverHealth.msg"
+  "msg/WheelPerturbation.msg"
   "srv/SetMode.srv"
   "srv/StartTrial.srv"
   "srv/StopTrial.srv"

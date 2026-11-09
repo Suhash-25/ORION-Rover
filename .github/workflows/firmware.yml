@@ -1,0 +1,50 @@
+# Firmware: host unit tests of the portable core (codec + control core) under ASan/UBSan,
+# and a compile-only PlatformIO build of the Teensy 4.1 example target.
+name: firmware
+
+on:
+  push:
+    branches: [main]
+    paths: ['firmware/**', '.github/workflows/firmware.yml']
+  pull_request:
+    paths: ['firmware/**', '.github/workflows/firmware.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: firmware-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GoogleTest
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtest-dev cmake g++
+      - name: Build and run host tests (ASan + UBSan)
+        run: |
+          cmake -S firmware -B build/fw -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build/fw -j2
+          ctest --test-dir build/fw --output-on-failure
+
+  platformio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+      - name: Install PlatformIO
+        run: python -m pip install platformio
+      - name: Native unit tests
+        working-directory: firmware
+        run: pio test -e native
+      - name: Teensy 4.1 compile (example target; pins unconfirmed)
+        working-directory: firmware
+        run: pio run -e teensy41

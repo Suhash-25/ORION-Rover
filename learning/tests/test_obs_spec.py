@@ -5,9 +5,10 @@ from orion_learning import obs_spec as S
 
 
 def _obs(**kw):
-    base = dict(prev_cmd=(0.0, 0.0), wheel_speed=(0, 0, 0, 0), wheel_effort=(0, 0, 0, 0),
-                effort_max=3.0, body_accel_xy=(0, 0), yaw_rate=0.0, roll=0.0, pitch=0.0,
-                body_speed=0.0, speed_confidence=1.0, slip_side=(0, 0), sinkage_proxy=0.0)
+    base = {'prev_cmd': (0.0, 0.0), 'wheel_speed': (0, 0, 0, 0), 'wheel_effort': (0, 0, 0, 0),
+            'effort_max': 3.0, 'body_accel_xy': (0, 0), 'yaw_rate': 0.0, 'roll': 0.0,
+            'pitch': 0.0, 'body_speed': 0.0, 'speed_confidence': 1.0, 'slip_side': (0, 0),
+            'sinkage_proxy': 0.0}
     base.update(kw)
     return S.build_observation(**base)
 
@@ -59,3 +60,34 @@ def test_action_mapping_and_rate_limit():
 def test_hash_is_stable_and_short():
     assert len(S.OBS_SPEC_HASH) == 16
     assert S.describe()['obs_spec_hash'] == S.OBS_SPEC_HASH
+
+
+# The current OBS_SPEC_HASH. A change of layout OR semantics must change it on purpose: update
+# this value, re-export every ONNX artefact and note it in the engineering log.
+PINNED_HASH = 'f28f136d0518c63d'
+
+
+def test_hash_is_pinned():
+    assert S.OBS_SPEC_HASH == PINNED_HASH
+
+
+def test_hash_covers_semantics_not_only_layout():
+    """History convention, confidence formula and low-pass tau are part of the hash (B2)."""
+    import hashlib
+    import json
+
+    from orion_learning import estimator as est
+
+    def digest(layout):
+        return hashlib.sha256(json.dumps(layout, sort_keys=True).encode()).hexdigest()[:16]
+
+    base = S._layout()
+    assert digest(base) == S.OBS_SPEC_HASH
+    sem = base['semantics']
+    assert sem['history'] == S.HISTORY_CONVENTION
+    assert sem['confidence'] == est.CONFIDENCE_FORMULA
+    assert sem['lowpass'][1] == est.LOWPASS_TAU_S
+    for key, value in (('history', 'row_k=[obs_k,raw a_(k-1)]'), ('confidence', 'old'),
+                       ('lowpass', [est.LOWPASS_FORMULA, 0.3])):
+        changed = dict(base, semantics=dict(sem, **{key: value}))
+        assert digest(changed) != S.OBS_SPEC_HASH, key

@@ -1,4 +1,4 @@
-"""Start ORION controllers and keyboard teleoperation for Gazebo simulation."""
+"""Spawn ORION controllers, then optionally keyboard teleop (Gazebo or the real rover)."""
 
 import os
 
@@ -55,6 +55,7 @@ def generate_launch_description():
             os.path.join(control_share, "launch", "teleop.launch.py")
         ),
         condition=IfCondition(LaunchConfiguration("teleop")),
+        launch_arguments={"use_sim_time": LaunchConfiguration("use_sim_time")}.items(),
     )
 
     def start_teleop_after_success(event, _context):
@@ -66,6 +67,11 @@ def generate_launch_description():
             "teleop",
             default_value="true",
             description="Open the keyboard teleop terminal (needs a desktop)",
+        ),
+        DeclareLaunchArgument(
+            "use_sim_time",
+            default_value="true",
+            description="Passed to teleop; false on the real rover",
         ),
         joint_state_broadcaster,
         RegisterEventHandler(

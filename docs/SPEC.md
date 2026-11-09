@@ -62,7 +62,13 @@ m_total/14, g/9.81.
 - Body speed priority: EXTERNAL > LIDAR_ODOM > IMU_ONLY. 1-D Kalman on v_x: predict with
   gravity-compensated a_x, Q = (0.1 m/s^2)^2 dt; update R = (0.02 m/s)^2 external,
   (0.05 m/s)^2 lidar. Wheel odometry is never a body-speed source.
-- Confidence c = exp(-t_since_fix / 3 s) * (1 - min(1, |v_x,wheel - v_x| / 0.5)).
+- Confidence c = exp(-t_since_fix / 3 s) * clip(1 - kf_std / 0.1 m/s, 0, 1), kf_std = the
+  Kalman 1-sigma of v_x, t_since_fix = age of the last EXTERNAL / LIDAR_ODOM fix (inf before
+  the first, so c = 0). Wheel odometry plays no part (council M7: the former
+  1 - |v_x,wheel - v_x| / 0.5 term went to 0 exactly when the wheels spun in a trap). One
+  implementation: learning/orion_learning/estimator.py `speed_confidence`, used by the env and
+  orion_terrain. Fresh-fix rule: consumers that gate on the speed (the stuck rule, section 5)
+  trust it without the confidence while the fix is < 0.5 s old (`time_since_fix` + message age).
 - Effort model I_hat = c0 + c1 |w| + c2 dw/dt + c3 sin(pitch) sign(w), least squares on
   5 min packed-light driving, stored in orion_terrain/config/effort_model.yaml with git SHA.
   Residual e_i = I_i - I_hat_i; sinkage_proxy = clip(mean(e_i) / I_ref, 0, 1),
@@ -81,7 +87,7 @@ m_total/14, g/9.81.
 | heartbeat (firmware) | no CMD frame for 200 ms | targets 0, PID off, coast |
 | heartbeat (host) | /joint_states older than 300 ms or /imu/data older than 500 ms | HALT |
 | geofence | keep-in polygon (2 x 2 m minus 0.15 m); predicted pose in 1 s outside -> LIMITED; outside -> HALT | |
-| stuck | cmd v > 0.1 and body speed < 0.03 m/s for 3 s (confidence > 0.3), or slip_side > 0.8 for 3 s | flag stuck, policy arms ESCAPE; no halt |
+| stuck | cmd v > 0.1 and body speed < 0.03 m/s for 3 s with the speed trusted (a fix < 0.5 s old, or confidence > 0.3), or slip_side > 0.8 in the driven direction for 3 s | flag stuck, policy arms ESCAPE; no halt |
 | hard-stuck | stuck and < 0.1 m net progress over 20 s | HALT, outcome ENTRAPPED |
 | e-stop | /orion/estop true (latched) | ESTOP, mux lock, firmware ESTOP frame; clear via EstopReset |
 
@@ -152,18 +158,87 @@ Randomised order. Metrics: success, time-to-goal, entrapped, time-to-entrapment 
 critic calibration. Metadata: git SHA, firmware hash, ONNX sha256, obs_spec_hash, cell,
 ballast, cone depths, operator, timestamp, bag path.
 
+Failure = outcome TIMEOUT, ENTRAPPED or SAFETY (pre-registered). SAFETY includes the current
+HALT, whose threshold I_peak (12 A) is a GUESS until the motor drivers are known (section 5), so
+the report lists SAFETY outcomes per cell next to every test.
+
+ENTRAPPED has two automatic triggers (decided 2026-11-09, FINAL; this changes what is
+labelled ENTRAPPED, not what counts as failure): (1) orion_safety's hard-stuck HALT
+(section 5); (2) **the controller gives up**: after `max_escape_attempts` (3) escapes of the
+library E without a clean driving tick in between, orion_policy goes IDLE with a zero command
+and sets `PolicyStatus.escapes_exhausted`; the trial runner ends the trial ENTRAPPED (source
+"policy gave up", `policy_gave_up_ros_s` in metadata.json). Why: the hard-stuck rule needs a
+command > 0.1 m/s, so it can never fire on a rover that has stopped itself, and the trial
+would otherwise run to TIMEOUT. TIMEOUT and ENTRAPPED are both failures, so the Phase-0 and
+main-study failure rates do not change; what changes is time-to-entrapment, the ENTRAPPED
+count and the critic calibration labels (a rover sitting still after giving up is not "safe"
+for the rest of the trial). The give-up is labelled like the HALT: t_entrap is the first
+FLAG_STUCK of the stuck episode that ended in the give-up (analysis `entrapment_source` =
+'policy_gave_up'); a give-up without any FLAG_STUCK (escapes armed by the critic, rho > 0.7)
+is dated at the give-up itself. Caveat: in that last case the critic's own output started the
+escapes that ended in the label, so the report gives `entrapment_source` per trial and
+calibration can be repeated without those trials. Simulation counts it the same way
+(`evaluate.py` outcome 'gave_up', critic branch labels via `risk.entrapment_events`). Critic calibration label at time
+t (council M2): in an ENTRAPPED trial 1 if t_entrap - t <= 10 s, where t_entrap is the first
+FLAG_STUCK of the stuck episode that ended in the hard-stuck HALT or the give-up (not the
+HALT, which comes ~23 s after motion stops); in other trials 0 when >= 10 s of trial remain,
+else censored.
+
 Phase-0 kill test (pre-registered, two-stage; D-008): B0 tuned on light-packed (cell C).
 Stage 1 (pilot): 20 trials in each of the 4 cells. Early GO if for at least one loose cell the
-failure rate rises >= 0.25 over light-packed with one-sided Fisher exact p < 0.01, or median
-effective speed drops >= 30 % with Mann-Whitney p < 0.01. Stage 2 (if no early GO): extend
-light-packed (C) and light-loose (D) to 40 trials each and test C vs D once more at p < 0.04
-(same effect-size rules). GO if stage 2 passes; otherwise NO-GO and pivot to self-rescue.
-The 0.01 / 0.04 split keeps the overall false-GO rate at or below 0.05 across the two looks.
-Power for trap rates 10 % vs 40 %: about 0.49 at 20 per cell, 0.85 at 40 (paper, Sample Size).
-Main study: 4 cells x 4 controllers (B0, B2,
-student, student + critic) x 25 = 400 trials, Holm-corrected Fisher on failure rate.
+failure rate is higher than in light-packed with one-sided Fisher exact p < 0.01, or the
+effective speed is lower with one-sided Mann-Whitney p < 0.01. Stage 2 (if no early GO): extend
+light-packed (C) and light-loose (D) to 40 trials each and test C vs D once more at p < 0.04.
+GO if stage 2 passes; otherwise NO-GO and pivot to self-rescue. The effect sizes are reported
+next to the decision, descriptively: failure-rate rise with a Newcombe hybrid-score 95 % CI and
+median-speed drop with a seeded bootstrap 95 % CI. This is the council M3 rule; the switch
+`EFFECT_SIZE_GATE` in orion_experiments/analysis.py (CLI `--effect-size-gate`) restores the
+original D-008 rule, which also required a rise >= 0.25 or a drop >= 30 % (open decision,
+section 9). heavy-loose differs from light-packed in two factors (ballast and soil), so a GO
+that rests on heavy-loose alone is reported as a two-factor result: H1 is the C -> D transfer.
+
+Power and false-GO rate of the implemented rule, simulated by `ros2 run orion_experiments
+phase0_power` (20000 sessions per row, seed 20261109, Monte-Carlo SE <= 0.004; failures
+Bernoulli; a failed trial is always slower than a successful one, so the speed test only sees
+the failure counts unless successful runs also slow down on loose soil). C = light-packed,
+D = light-loose, B = heavy-loose; stage-1 early-GO probability in brackets:
+
+| rule | power, C 10 % / D 40 % / B 40 % | power, B 10 % | false GO, all cells 10 % | all 30 % |
+| --- | --- | --- | --- | --- |
+| ungated, failures only (**implemented default**; speed reported, not decisive) | 0.91 (stage 1: 0.51) | 0.89 | 0.017 | 0.029 |
+| ungated, failures + speed (`--speed-in-decision`) | 0.93 (0.58) | 0.91 | **0.062** | **0.063** |
+| ungated, every test at alpha / 2 | 0.87 (0.45) | 0.85 | 0.031 | 0.033 |
+| gated, failures + speed (`--effect-size-gate`) | 0.81 (0.55) | 0.75 | 0.002 | 0.027 |
+| gated, failures only | 0.80 (0.51) | 0.75 | 0.001 | 0.017 |
+
+The 0.01 / 0.04 split bounds the false-GO rate at 0.05 only for one test per look. The rule
+runs four tests at stage 1 (2 loose cells x 2 metrics) and two at stage 2, so the ungated rule
+with the speed test exceeds 0.05 (0.062-0.063). The failure-only or alpha / 2 variants keep it
+below 0.05, which is why the default decides on the failure rate alone (`SPEED_IN_DECISION =
+False`); effective speed is still reported with its CI. See section 9. Reference (not the implemented rule): a plain two-sided Fisher test
+at 0.05 on 10 % vs 40 % has exact power 0.49 at 20 per cell, 0.71 at 30, 0.85 at 40.
+
+Main study: 4 cells x 4 controllers (B0, B2, student, student + critic) x 25 = 400 trials.
+Primary (pre-registered, council m7): student + critic fails less often than B0, both pooled
+over light-loose and heavy-loose (50 vs 50), one-sided Fisher at 0.05, unadjusted. Secondary:
+the 4 comparisons in each of the 4 cells (16 tests), one-sided Fisher, Holm-corrected. Exact
+power at n = 25 per cell: for B0 40 % vs 20 %, 0.07 at Holm's first step (0.05 / 16) and 0.35
+unadjusted; 40 % vs 10 %: 0.29 and 0.73. The pooled primary at 50 vs 50 has 0.64 (40 % vs
+20 %) and 0.96 (40 % vs 10 %). Per-cell results are descriptive unless the effect is large.
 
 ## 9. Open decisions for the user
+
+- **Phase-0 decision rule (council M3): DECIDED 2026-11-09 13:28, option (b), by the user.**
+  Pre-registered and implemented as the default (b):
+  GO on the one-sided failure-rate test at 0.01 / 0.04 alone, effect sizes and speed reported
+  with CIs (`EFFECT_SIZE_GATE = False`, `SPEED_IN_DECISION = False`). Options, with the
+  simulated numbers of section 8 (power at 10 % vs 40 %, false GO under H0):
+  (a) failures + speed (`--speed-in-decision`): power 0.91-0.93, false GO 0.062-0.063, above
+  the 0.05 the design promised; (b) ungated, failure rate only (the default): power
+  0.89-0.91, false GO 0.017-0.029; (c) ungated, every test at alpha / 2: power 0.85-0.87, false
+  GO 0.031-0.033; (d) the gated D-008 rule (`--effect-size-gate`): power 0.75-0.81, false GO
+  0.002-0.027. The implementer's recommendation is (b): almost the same power as (a), and the
+  0.05 bound holds. Whatever is chosen must be fixed before the first stage-1 trial.
 
 - Ballast mass for "heavy"; I_cont / I_peak after the hardware inventory.
 - Is an overhead camera + AprilTag acceptable for ground truth? Without it, slip truth is

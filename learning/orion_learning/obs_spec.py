@@ -5,7 +5,9 @@ orion_policy). If training and runtime disagree on anything here, the policy sil
 gets garbage on the real rover, so nothing else may re-define these layouts.
 
 Changing anything below changes OBS_SPEC_HASH, and orion_policy refuses to load an ONNX
-model exported with a different hash.
+model exported with a different hash. The hash covers the layout AND the semantics (SEMANTICS:
+history convention, confidence formula, low-pass, Kalman and effort-model constants), because
+a model trained on one meaning of a field is as wrong on another as on a shuffled layout.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ import json
 from typing import Mapping, Sequence
 
 import numpy as np
+
+from orion_learning import estimator as _est
 
 # --- Robot geometry (must match orion_description/urdf/common/constants.xacro) -------------
 WHEEL_RADIUS_M = 0.12
@@ -80,8 +84,28 @@ PRIVILEGED_FIELDS: tuple[Field, ...] = (
 PRIVILEGED_DIM = sum(f.size for f in PRIVILEGED_FIELDS)
 
 
+# History convention (implemented once, in orion_learning.history): row k of the adapter input
+# is [obs_k, a_(k-1)], a_(k-1) = the command actually executed on the previous step in action
+# units (= obs_k's prev_cmd), pushed before inference, oldest first, zero rows before the
+# first observation of an episode.
+HISTORY_CONVENTION = 'row_k=[obs_k,executed a_(k-1)=obs_k.prev_cmd],push-before-infer,zero-pad'
+PREV_CMD_MEANING = 'rate-limited command actually sent (rover: after safety scaling)'
+
+# What the fields MEAN beyond their layout; hashed together with the layout.
+SEMANTICS: dict = {
+    'history': HISTORY_CONVENTION,
+    'prev_cmd': PREV_CMD_MEANING,
+    'confidence': _est.CONFIDENCE_FORMULA,
+    'lowpass': [_est.LOWPASS_FORMULA, _est.LOWPASS_TAU_S],
+    'kalman': [_est.KF_ACCEL_SIGMA, _est.FIX_SIGMA_EXTERNAL, _est.FIX_SIGMA_LIDAR],
+    'effort': [_est.EFFORT_FORMULA, _est.INFORMATIVE_MIN_WHEEL_SPEED,
+               _est.INFORMATIVE_MAX_YAW_RATE],
+}
+
+
 def _layout() -> dict:
     return {
+        'semantics': SEMANTICS,
         'obs': [(f.name, f.size, f.unit) for f in OBS_FIELDS],
         'privileged': [(f.name, f.size, f.unit) for f in PRIVILEGED_FIELDS],
         'scales': [WHEEL_RADIUS_M, TRACK_WIDTH_M, MAX_LINEAR_SPEED, MAX_ANGULAR_SPEED,
@@ -96,7 +120,7 @@ OBS_SPEC_HASH = hashlib.sha256(
 
 
 def field_slice(name: str) -> slice:
-    """Index range of an observation field, e.g. obs[field_slice('slip_side')]."""
+    """Index range of an observation field, e.g. obs[field_slice('slip_side')]."""  # noqa: D402
     start = 0
     for f in OBS_FIELDS:
         if f.name == name:
@@ -109,19 +133,24 @@ def wheel_slip(wheel_speed: Sequence[float], body_speed: float, yaw_rate: float)
     """Per-wheel longitudinal slip, FL FR RL RR, bounded to [-1, 1].
 
     s_i = (r w_i - v_side) / max(|r w_i|, |v_side|, 0.02); positive = spinning.
+    Also accepts a batch: wheel_speed (..., 4), body_speed and yaw_rate (...).
     """
     w = np.asarray(wheel_speed, dtype=np.float64)
-    v_left = body_speed - yaw_rate * TRACK_WIDTH_M / 2.0
-    v_right = body_speed + yaw_rate * TRACK_WIDTH_M / 2.0
-    v_side = np.array([v_left, v_right, v_left, v_right])
+    v = np.asarray(body_speed, dtype=np.float64)[..., None]
+    half = np.asarray(yaw_rate, dtype=np.float64)[..., None] * TRACK_WIDTH_M / 2.0
+    v_left = v - half
+    v_right = v + half
+    v_side = np.concatenate([v_left, v_right, v_left, v_right], axis=-1)
     rim = WHEEL_RADIUS_M * w
     denom = np.maximum(np.maximum(np.abs(rim), np.abs(v_side)), SLIP_FLOOR_MPS)
     return np.clip((rim - v_side) / denom, -1.0, 1.0)
 
 
 def side_mean(per_wheel: Sequence[float]) -> np.ndarray:
+    """Mean of the left (FL, RL) and right (FR, RR) wheels; (..., 4) -> (..., 2)."""
     a = np.asarray(per_wheel, dtype=np.float64)
-    return np.array([a[list(LEFT_WHEELS)].mean(), a[list(RIGHT_WHEELS)].mean()])
+    return np.stack([a[..., list(LEFT_WHEELS)].mean(axis=-1),
+                     a[..., list(RIGHT_WHEELS)].mean(axis=-1)], axis=-1)
 
 
 def build_observation(
@@ -143,22 +172,31 @@ def build_observation(
 
     prev_cmd is (v m/s, w rad/s). wheel_effort is in the same unit as effort_max
     (amps on the rover, N.m in simulation). body_accel_xy must already have gravity removed.
+    Also accepts a batch: every argument may carry the same leading batch shape as
+    body_speed (e.g. wheel_speed (N, 4), yaw_rate (N,)); the result is then (N, OBS_DIM).
     """
+    batch = np.shape(body_speed)
+
+    def part(x, size, scale=1.0):
+        return np.reshape(np.asarray(x, dtype=np.float64), batch + (size,)) / scale
+
     parts = [
-        np.asarray(prev_cmd, dtype=np.float64) / (MAX_LINEAR_SPEED, MAX_ANGULAR_SPEED),
-        np.asarray(wheel_speed, dtype=np.float64) / WHEEL_SPEED_SCALE,
-        np.asarray(wheel_effort, dtype=np.float64) / float(effort_max),
-        np.asarray(body_accel_xy, dtype=np.float64) / ACCEL_SCALE,
-        [yaw_rate / YAW_RATE_SCALE],
-        [roll / TILT_SCALE, pitch / TILT_SCALE],
-        [body_speed / MAX_LINEAR_SPEED],
-        [speed_confidence],
-        np.asarray(slip_side, dtype=np.float64),
-        [sinkage_proxy],
+        part(prev_cmd, 2, np.array([MAX_LINEAR_SPEED, MAX_ANGULAR_SPEED])),
+        part(wheel_speed, 4, WHEEL_SPEED_SCALE),
+        part(wheel_effort, 4, np.reshape(np.asarray(effort_max, dtype=np.float64),
+                                         np.shape(effort_max) + (1,))),
+        part(body_accel_xy, 2, ACCEL_SCALE),
+        part(yaw_rate, 1, YAW_RATE_SCALE),
+        np.stack(np.broadcast_arrays(np.asarray(roll, dtype=np.float64) / TILT_SCALE,
+                                     np.asarray(pitch, dtype=np.float64) / TILT_SCALE), -1),
+        part(body_speed, 1, MAX_LINEAR_SPEED),
+        part(speed_confidence, 1),
+        part(slip_side, 2),
+        part(sinkage_proxy, 1),
     ]
-    obs = np.concatenate([np.ravel(p) for p in parts])
-    if obs.shape != (OBS_DIM,):
-        raise ValueError(f'observation has shape {obs.shape}, expected ({OBS_DIM},)')
+    obs = np.concatenate(parts, axis=-1)
+    if obs.shape != batch + (OBS_DIM,):
+        raise ValueError(f'observation has shape {obs.shape}, expected {batch + (OBS_DIM,)}')
     return np.clip(obs, -OBS_CLIP, OBS_CLIP).astype(np.float32)
 
 

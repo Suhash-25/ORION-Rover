@@ -1,0 +1,54 @@
+# CI smoke run: every stage end to end with tiny sizes (< 3 min on one CPU core).
+# Proves the pipeline works and produces finite metrics; the policies it trains are useless.
+name: smoke
+seed: 0
+torch_threads: 1
+env: {}                      # EnvConfig overrides; {} = training distribution (env.py, B1)
+# Training distribution (council B1): rejection threshold on peak steady DP/W annealed from
+# env.dp_threshold[0] = 0.08 to [1] = 0.0 over this fraction of each PPO stage.
+dp_curriculum_fraction: 0.3333
+# Pre-registered target: fraction of training episodes B0 completes (logged every PPO
+# iteration as b0_completable by a shadow B0 rollout; summary.json says if the mean is in).
+b0_completable_band: [0.4, 0.6]
+b0_monitor: {num_envs: 16, steps_per_iter: 200, window: 256}
+
+teacher:
+  num_envs: 16
+  rollout_steps: 64
+  iterations: 3
+  epochs: 2
+  minibatches: 2
+  hidden: [32, 32]
+  encoder_hidden: [16]
+
+student:
+  num_envs: 16
+  iterations: 2
+  steps_per_iter: 64
+  epochs: 2
+  batch_size: 256
+  channels: 8
+
+critic:
+  num_envs: 16
+  rollout_steps: 81
+  sample_every: 40
+  warmup_steps: 40
+  rounds: 1
+  holdout_rounds: 1
+  branches: 5   # one per escape manoeuvre in orion_learning.escape_library.E
+  horizon_s: 10.0
+  epochs: 5
+  hidden: [16, 16]
+
+b2:
+  num_envs: 16
+  rollout_steps: 64
+  iterations: 3
+  epochs: 2
+  minibatches: 2
+  hidden: [32, 32]
+
+evaluate:
+  trials: 2
+  controllers: [B0, B2, student, student+critic]
