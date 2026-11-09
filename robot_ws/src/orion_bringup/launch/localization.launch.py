@@ -39,7 +39,7 @@ def generate_launch_description():
     map_file = os.path.join(
         bringup_pkg,
         "maps",
-        "my_first_map.yaml",
+        "orion_map.yaml",
     )
 
     map_server = Node(
