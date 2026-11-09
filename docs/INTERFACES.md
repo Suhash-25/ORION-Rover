@@ -52,7 +52,7 @@ in `/orion/safety_status` themselves; twist_mux does not scale commands (docs/SA
 | `/diff_drive_controller/odom` | nav_msgs/Odometry | diff_drive_controller | Nav2, AMCL, orion_safety (geofence fallback only) | 50 Hz | wheel odometry, frame `odom` -> `base_link`. Not body velocity under slip (SPEC F4) | live |
 | `/imu/data` | sensor_msgs/Imu | Gazebo IMU via ros_gz_bridge; real IMU driver (hardware list pending) | orion_safety (heartbeat, tilt), orion_terrain | 100 Hz sim | frame `imu_link`; orientation (if provided), angular_velocity rad/s, linear_acceleration m/s^2 (reads +9.8 z at rest) | live (sim) |
 | `/scan` | sensor_msgs/LaserScan | Gazebo gpu_lidar via ros_gz_bridge; real lidar driver (pending) | slam_toolbox, AMCL, Nav2 costmaps, rf2o | 10 Hz | frame `lidar_link`, 720 samples, 360 deg, 0.12-12 m | live (sim) |
-| `/clock` | rosgraph_msgs/Clock | ros_gz_bridge (`clock_bridge.launch`) | every node with use_sim_time | sim step | sim only | live (sim) |
+| `/clock` | rosgraph_msgs/Clock | ros_gz_bridge `parameter_bridge` (orion_bringup gazebo.launch.py) | every node with use_sim_time | sim step | sim only | live (sim) |
 | `/robot_description` | std_msgs/String | robot_state_publisher | gz spawn (`create`), ros2_control_node (real rover) | latched | URDF from xacro with `hardware:=gazebo|serial` | live |
 | `/tf`, `/tf_static` | tf2_msgs/TFMessage | robot_state_publisher (static + wheels), diff_drive_controller (`odom` -> `base_link`), AMCL (`map` -> `odom`) | everyone | 50-100 Hz | see Frames | live |
 | `/map` | nav_msgs/OccupancyGrid | nav2 map_server / slam_toolbox | AMCL, Nav2 | latched | `orion_bringup/maps/orion_map.yaml` | live |
